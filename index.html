@@ -72,7 +72,6 @@
       <div>⏳ <span id="blind-countdown">05:00</span></div>
     </div>
 
-    <!-- [신규] 방장용 게임 종료 및 리바이 버튼 영역 -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
       <div id="host-game-controls" style="display: none;">
         <button onclick="endGame()" style="background-color: #c0392b; color: white; padding: 8px 12px; font-size: 13px;">🛑 종료 및 정산</button>
@@ -145,6 +144,15 @@
         <div><span class="term">포카드</span> 같은 숫자 4장 <span class="example">(예: ♠A ♥A ♦A ♣A)</span></div>
         <div><span class="term">스트레이트 플러시</span> 무늬 같고 숫자 연속 <span class="example">(최강)</span></div>
       </div>
+
+      <!-- [신규] 재접속 가이드 안내문 추가 -->
+      <div style="border-top: 1px dashed #1abc9c; padding-top: 10px; margin-top: 10px; font-size: 13px;">
+        <div style="color: #ff9ff3; font-weight: bold; margin-bottom: 5px;">🚨 게임 중 튕겼을 때 (재접속 안내)</div>
+        <div style="color: #ecf0f1; line-height: 1.5;">
+          실수로 창을 닫거나 통신이 끊겨도 당황하지 마세요!<br>
+          <span style="color: #f1c40f; font-weight: bold;">방 번호와 '기존과 정확히 똑같은 닉네임'</span>으로 다시 입장하시면, 가지고 있던 칩과 카드, 현재 턴이 원래대로 완벽하게 복구됩니다.
+        </div>
+      </div>
     </div>
   </div>
 
@@ -177,7 +185,6 @@
     function startGame() { socket.emit('start_game'); }
     function requestRebuy() { socket.emit('rebuy'); showCustomAlert("💸 충전 완료.\n진행 중인 판이 끝나면 적용됩니다."); }
     
-    // [신규] 방장용 게임 종료 요청 함수
     function endGame() {
       if(confirm("정말로 게임을 종료하고 최종 정산을 진행하시겠습니까? (로비로 돌아갑니다)")) {
         socket.emit('end_game');
@@ -225,7 +232,7 @@
       document.getElementById('lobby-room-code').innerText = document.getElementById('room-code').value;
       document.getElementById('login-screen').style.display = 'none';
       document.getElementById('lobby-screen').style.display = 'block';
-      document.getElementById('game-room').style.display = 'none'; // 게임 방 숨김
+      document.getElementById('game-room').style.display = 'none'; 
 
       const ul = document.getElementById('lobby-players');
       ul.innerHTML = '';
@@ -233,7 +240,8 @@
 
       players.forEach(p => {
         const crown = p.isHost ? '👑' : '';
-        ul.innerHTML += `<li>${crown} ${p.name}</li>`;
+        const offlineMark = p.isOffline ? ' <span style="color:#e74c3c; font-size:12px;">(오프라인)</span>' : '';
+        ul.innerHTML += `<li>${crown} ${p.name}${offlineMark}</li>`;
       });
 
       if (myInfo && myInfo.isHost) {
@@ -282,7 +290,6 @@
 
       const myInfo = gameData.players[myId];
       
-      // [신규] 방장용 종료 버튼 노출 여부
       if (myInfo && myInfo.isHost) {
         document.getElementById('host-game-controls').style.display = 'block';
       } else {
@@ -327,7 +334,8 @@
         const isTurn = p.id === gameData.currentTurnId;
         
         let stateMark = '';
-        if (p.state === 'folded') stateMark = '❌(폴드)';
+        if (p.isOffline) stateMark = '⚠️(연결끊김)';
+        else if (p.state === 'folded') stateMark = '❌(폴드)';
         else if (p.chips === 0 && p.state === 'playing') stateMark = '🔥(올인)';
         else if (p.state === 'waiting') stateMark = '⏳(대기)';
         else if (p.state === 'busted') stateMark = '💀(파산)';
@@ -335,7 +343,7 @@
 
         if(isTurn) turnPlayerName = p.name;
         const turnClass = isTurn ? 'turn-highlight' : '';
-        const opacity = (p.state === 'busted' || p.state === 'waiting') ? '0.5' : '1';
+        const opacity = (p.state === 'busted' || p.state === 'waiting' || p.isOffline) ? '0.5' : '1';
 
         board.innerHTML += `
           <div style="background: #2c3e50; padding: 10px; border-radius: 8px; border: 2px solid transparent; width: 100px; opacity: ${opacity};" class="${turnClass}">
