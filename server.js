@@ -4,7 +4,7 @@ const app = express();
 const path = require('path');
 const http = require('http').createServer(app);
 
-// [핵심 수정 1] 클라우드 환경을 위한 CORS(웹소켓 통신 보안) 허용
+// 클라우드 환경을 위한 CORS(웹소켓 통신 보안) 허용
 const io = require('socket.io')(http, {
   cors: {
     origin: "*",
@@ -20,7 +20,6 @@ const BLIND_STRUCTURE = [
 ];
 const BLIND_DURATION = 5 * 60 * 1000; 
 
-// [안정성 수정] 절대 경로(path.join)를 사용하여 렌더(리눅스) 환경 에러 방지
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
 
 function createDeck() {
@@ -171,15 +170,11 @@ function processAllInShowdown(io, roomCode) {
 }
 
 io.on('connection', (socket) => {
+  
   socket.on('join_room', (data) => {
     const roomCode = data.roomCode;
     const playerName = data.playerName;
     
-    if (rooms[roomCode]) {
-      const isDuplicate = Object.values(rooms[roomCode].players).some(p => p.name === playerName);
-      if (isDuplicate) return socket.emit('join_error', '⚠️ 이미 접속 중인 닉네임입니다. 다른 닉네임을 사용해주세요.');
-    }
-
     socket.join(roomCode);
     socket.roomCode = roomCode;
 
@@ -192,18 +187,55 @@ io.on('connection', (socket) => {
       };
     }
 
-    rooms[roomCode].players[socket.id] = {
-      id: socket.id, name: playerName, chips: 10000,
-      isHost: rooms[roomCode].playerOrder.length === 0, 
-      cards: [], currentBet: 0, invested: 0, state: 'waiting', acted: false, rebuyCount: 0
-    };
-    rooms[roomCode].playerOrder.push(socket.id);
+    const room = rooms[roomCode];
+
+    // 기존 닉네임이 방에 있는지 확인
+    let existingPlayerKey = Object.keys(room.players).find(key => room.players[key].name === playerName);
     
-    if (rooms[roomCode].status === 'playing') {
-      socket.emit('game_started', getGameState(rooms[roomCode]));
-      io.to(roomCode).emit('update_game_state', getGameState(rooms[roomCode]));
+    if (existingPlayerKey) {
+      let existingPlayer = room.players[existingPlayerKey];
+      
+      if (existingPlayer.isOffline) {
+        // [재접속] 튕겼던 유저가 원래 닉네임으로 들어온 경우 데이터 복구
+        existingPlayer.id = socket.id;
+        existingPlayer.isOffline = false; 
+        
+        room.players[socket.id] = existingPlayer;
+        delete room.players[existingPlayerKey];
+        
+        let orderIdx = room.playerOrder.indexOf(existingPlayerKey);
+        if (orderIdx !== -1) room.playerOrder[orderIdx] = socket.id;
+
+        if(room.dealerId === existingPlayerKey) room.dealerId = socket.id;
+        if(room.currentTurnId === existingPlayerKey) room.currentTurnId = socket.id;
+        if(room.uncontestedWinner === existingPlayerKey) room.uncontestedWinner = socket.id;
+
+        if (room.status === 'playing') {
+          socket.emit('game_started', getGameState(room));
+          io.to(roomCode).emit('update_game_state', getGameState(room));
+        } else {
+          io.to(roomCode).emit('update_lobby', Object.values(room.players));
+        }
+        return; 
+      } else {
+        return socket.emit('join_error', '⚠️ 이미 접속 중인 닉네임입니다. 다른 닉네임을 사용해주세요.');
+      }
+    }
+
+    // 신규 접속자 생성 (isOffline 플래그 추가)
+    room.players[socket.id] = {
+      id: socket.id, name: playerName, chips: 10000,
+      isHost: room.playerOrder.filter(id => !room.players[id].isOffline).length === 0, 
+      cards: [], currentBet: 0, invested: 0, state: 'waiting', acted: false, rebuyCount: 0,
+      isOffline: false
+    };
+    room.playerOrder.push(socket.id);
+    
+    if (room.status === 'playing') {
+      socket.emit('game_started', getGameState(room));
+      io.to(roomCode).emit('update_game_state', getGameState(room));
     } else {
-      io.to(roomCode).emit('update_lobby', Object.values(rooms[roomCode].players));
+      io.to(roomCode).emit('update_lobby', Object.values(room.players));
     }
   });
 
@@ -227,7 +259,7 @@ io.on('connection', (socket) => {
       }
 
       const currBlinds = BLIND_STRUCTURE[room.blindLevel] || BLIND_STRUCTURE[BLIND_STRUCTURE.length - 1];
-      const activeIds = room.playerOrder.filter(id => room.players[id].chips > 0);
+      const activeIds = room.playerOrder.filter(id => room.players[id].chips > 0 && !room.players[id].isOffline);
       if (activeIds.length < 2) return socket.emit('system_message', '칩을 가진 유저가 최소 2명 필요합니다.');
 
       const isNextHand = (room.stage === 5);
@@ -305,7 +337,8 @@ io.on('connection', (socket) => {
         }
       }
 
-      const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing');
+      // 턴 진행 검사 시 오프라인인 사람은 배제
+      const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline);
       
       if (activePlayers.length === 1) {
         const winner = room.players[activePlayers[0]];
@@ -393,14 +426,21 @@ io.on('connection', (socket) => {
       room.blindLevel = 0;
       room.blindEndTime = null;
       
-      Object.values(room.players).forEach(p => {
-        p.chips = 10000; 
-        p.rebuyCount = 0;
-        p.state = 'waiting';
-        p.cards = [];
-        p.currentBet = 0;
-        p.invested = 0;
-        p.acted = false;
+      // 정산 완료 후 로비로 돌아갈 때, 오프라인(도망간) 유저의 기록은 삭제하여 초기화
+      Object.keys(room.players).forEach(key => {
+        if(room.players[key].isOffline) {
+          delete room.players[key];
+          room.playerOrder = room.playerOrder.filter(id => id !== key);
+        } else {
+          let p = room.players[key];
+          p.chips = 10000; 
+          p.rebuyCount = 0;
+          p.state = 'waiting';
+          p.cards = [];
+          p.currentBet = 0;
+          p.invested = 0;
+          p.acted = false;
+        }
       });
       
       io.to(socket.roomCode).emit('update_lobby', Object.values(room.players));
@@ -411,22 +451,48 @@ io.on('connection', (socket) => {
     const roomCode = socket.roomCode;
     const room = rooms[roomCode];
     if (roomCode && room && room.players[socket.id]) {
-      const wasHost = room.players[socket.id].isHost;
+      const player = room.players[socket.id];
+      const wasHost = player.isHost;
       const isMyTurn = (room.currentTurnId === socket.id);
       
-      delete room.players[socket.id];
-      room.playerOrder = room.playerOrder.filter(id => id !== socket.id);
+      // 데이터 말소 대신 오프라인 플래그만 세움
+      player.isOffline = true;
 
-      if (room.playerOrder.length === 0) {
-        delete rooms[roomCode]; 
+      // 게임 도중에 나갔다면 강제 폴드
+      if (room.status === 'playing' && player.state === 'playing') {
+        player.state = 'folded';
+      }
+
+      // 생존자 확인
+      const onlinePlayers = room.playerOrder.filter(id => !room.players[id].isOffline);
+
+      if (onlinePlayers.length === 0) {
+        delete rooms[roomCode]; // 아무도 없으면 방 폭파
       } else {
-        if (wasHost) { room.players[room.playerOrder[0]].isHost = true; }
-        if (room.status === 'playing' && isMyTurn) {
-          const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing');
-          findNextTurn(room, activePlayers, false);
+        // 방장 권한 승계
+        if (wasHost) {
+          player.isHost = false;
+          room.players[onlinePlayers[0]].isHost = true;
         }
-        if (room.status === 'lobby') io.to(roomCode).emit('update_lobby', Object.values(room.players));
-        else io.to(roomCode).emit('update_game_state', getGameState(room));
+
+        // 나간 사람 턴 스킵 처리
+        if (room.status === 'playing' && isMyTurn) {
+          const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline);
+          
+          if (activePlayers.length === 1) {
+             const winner = room.players[activePlayers[0]];
+             winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id; 
+             room.currentTurnId = null;
+             io.to(roomCode).emit('system_message', `🎉 [${player.name}] 님의 탈주로 인해\n[${winner.name}]님이 ${room.pot}칩을 획득합니다.`);
+             io.to(roomCode).emit('update_game_state', getGameState(room));
+          } else {
+             findNextTurn(room, activePlayers, false);
+             io.to(roomCode).emit('update_game_state', getGameState(room));
+          }
+        } else {
+          if (room.status === 'lobby') io.to(roomCode).emit('update_lobby', Object.values(room.players));
+          else io.to(roomCode).emit('update_game_state', getGameState(room));
+        }
       }
     }
   });
@@ -449,7 +515,9 @@ function findNextTurn(room, activePlayers, isNewStage) {
   for(let i=0; i<activePlayers.length; i++) {
     turnIdx = (turnIdx + 1) % activePlayers.length;
     let nextP = room.players[activePlayers[turnIdx]];
-    if (nextP.state === 'playing' && nextP.chips > 0) { room.currentTurnId = nextP.id; nextFound = true; break; }
+    if (nextP.state === 'playing' && nextP.chips > 0 && !nextP.isOffline) { 
+      room.currentTurnId = nextP.id; nextFound = true; break; 
+    }
   }
   if(!nextFound) room.currentTurnId = null; 
 }
@@ -464,7 +532,6 @@ function getGameState(room) {
 }
 
 const PORT = process.env.PORT || 3000;
-// [핵심 수정 2] Render 등 외부 클라우드 접속을 허용하기 위한 '0.0.0.0' 호스트 바인딩
 http.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 홀덤 서버 클라우드 엔진 가동 완료! (포트: ${PORT})`);
 });
