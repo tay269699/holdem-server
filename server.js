@@ -1,8 +1,16 @@
 // server.js
 const express = require('express');
 const app = express();
+const path = require('path');
 const http = require('http').createServer(app);
-const io = require('socket.io')(http);
+
+// [핵심 수정 1] 클라우드 환경을 위한 CORS(웹소켓 통신 보안) 허용
+const io = require('socket.io')(http, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 
 let rooms = {};
 
@@ -12,7 +20,8 @@ const BLIND_STRUCTURE = [
 ];
 const BLIND_DURATION = 5 * 60 * 1000; 
 
-app.get('/', (req, res) => { res.sendFile(__dirname + '/index.html'); });
+// [안정성 수정] 절대 경로(path.join)를 사용하여 렌더(리눅스) 환경 에러 방지
+app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
 
 function createDeck() {
   const suits = ['♠', '♥', '♦', '♣']; const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -354,19 +363,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // [신규] 방장용 게임 종료 및 정산 기능
   socket.on('end_game', () => {
     const room = rooms[socket.roomCode];
     if (room && room.players[socket.id] && room.players[socket.id].isHost) {
       
-      // 순수익(Profit) 계산: 현재 칩 - (기본 1만 칩 + 리바이 횟수 * 1만 칩)
       let results = Object.values(room.players).map(p => {
         let totalInvested = 10000 + (p.rebuyCount * 10000);
         let profit = p.chips - totalInvested;
         return { name: p.name, chips: p.chips, rebuys: p.rebuyCount, profit: profit };
       });
 
-      // 가장 칩이 많은 사람 순으로 랭킹 정렬
       results.sort((a, b) => b.chips - a.chips);
 
       let finalMsg = `🏆 최종 정산 결과 🏆\n\n`;
@@ -383,13 +389,12 @@ io.on('connection', (socket) => {
 
       io.to(socket.roomCode).emit('system_message', finalMsg);
       
-      // 새 게임을 위해 방 상태를 로비로 전환하고 유저들 초기화
       room.status = 'lobby';
       room.blindLevel = 0;
       room.blindEndTime = null;
       
       Object.values(room.players).forEach(p => {
-        p.chips = 10000; // 새 출발을 위해 기본금 1만 칩 지급
+        p.chips = 10000; 
         p.rebuyCount = 0;
         p.state = 'waiting';
         p.cards = [];
@@ -458,6 +463,8 @@ function getGameState(room) {
   };
 }
 
-// 클라우드가 지정하는 포트가 있으면 그걸 쓰고, 없으면 3000을 씁니다.
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => console.log(`홀덤 서버 클라우드 가동! 포트: ${PORT}`));
+// [핵심 수정 2] Render 등 외부 클라우드 접속을 허용하기 위한 '0.0.0.0' 호스트 바인딩
+http.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 홀덤 서버 클라우드 엔진 가동 완료! (포트: ${PORT})`);
+});
