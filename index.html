@@ -145,12 +145,14 @@
         <div><span class="term">스트레이트 플러시</span> 무늬 같고 숫자 연속 <span class="example">(최강)</span></div>
       </div>
 
-      <!-- [신규] 재접속 가이드 안내문 추가 -->
+      <!-- [신규] 재접속 가이드 영역 추가 -->
       <div style="border-top: 1px dashed #1abc9c; padding-top: 10px; margin-top: 10px; font-size: 13px;">
-        <div style="color: #ff9ff3; font-weight: bold; margin-bottom: 5px;">🚨 게임 중 튕겼을 때 (재접속 안내)</div>
-        <div style="color: #ecf0f1; line-height: 1.5;">
-          실수로 창을 닫거나 통신이 끊겨도 당황하지 마세요!<br>
-          <span style="color: #f1c40f; font-weight: bold;">방 번호와 '기존과 정확히 똑같은 닉네임'</span>으로 다시 입장하시면, 가지고 있던 칩과 카드, 현재 턴이 원래대로 완벽하게 복구됩니다.
+        <div style="color: #e74c3c; font-weight: bold; margin-bottom: 5px;">🔌 접속 종료(튕김) 및 재접속 안내</div>
+        <div style="margin-bottom: 5px; color: #bdc3c7;">
+          • 게임 중 브라우저가 꺼지거나 튕기면 해당 판은 <strong>자동 폴드(포기)</strong> 처리되지만, 보유 칩과 정산 기록은 서버에 안전하게 <strong>보존</strong>됩니다.
+        </div>
+        <div style="color: #bdc3c7;">
+          • <strong>[복구 방법]</strong> 브라우저를 다시 켜고 원래 쓰던 <strong>'방 번호'와 '닉네임'을 정확히 똑같이 입력</strong>하여 입장하면, 남은 칩을 가지고 즉시 게임에 복귀할 수 있습니다.
         </div>
       </div>
     </div>
@@ -232,13 +234,14 @@
       document.getElementById('lobby-room-code').innerText = document.getElementById('room-code').value;
       document.getElementById('login-screen').style.display = 'none';
       document.getElementById('lobby-screen').style.display = 'block';
-      document.getElementById('game-room').style.display = 'none'; 
+      document.getElementById('game-room').style.display = 'none';
 
       const ul = document.getElementById('lobby-players');
       ul.innerHTML = '';
       let myInfo = players.find(p => p.id === myId);
 
       players.forEach(p => {
+        // [업데이트] 로비 화면에서도 오프라인(튕긴) 유저 상태를 표시
         const crown = p.isHost ? '👑' : '';
         const offlineMark = p.isOffline ? ' <span style="color:#e74c3c; font-size:12px;">(오프라인)</span>' : '';
         ul.innerHTML += `<li>${crown} ${p.name}${offlineMark}</li>`;
@@ -334,7 +337,7 @@
         const isTurn = p.id === gameData.currentTurnId;
         
         let stateMark = '';
-        if (p.isOffline) stateMark = '⚠️(연결끊김)';
+        if (p.isOffline) stateMark = '🔌(오프라인)';
         else if (p.state === 'folded') stateMark = '❌(폴드)';
         else if (p.chips === 0 && p.state === 'playing') stateMark = '🔥(올인)';
         else if (p.state === 'waiting') stateMark = '⏳(대기)';
@@ -343,7 +346,8 @@
 
         if(isTurn) turnPlayerName = p.name;
         const turnClass = isTurn ? 'turn-highlight' : '';
-        const opacity = (p.state === 'busted' || p.state === 'waiting' || p.isOffline) ? '0.5' : '1';
+        // 오프라인 유저는 더 투명하게 처리
+        const opacity = p.isOffline ? '0.3' : (p.state === 'busted' || p.state === 'waiting') ? '0.5' : '1';
 
         board.innerHTML += `
           <div style="background: #2c3e50; padding: 10px; border-radius: 8px; border: 2px solid transparent; width: 100px; opacity: ${opacity};" class="${turnClass}">
@@ -367,7 +371,7 @@
       else {
         document.getElementById('host-next-game').style.display = 'none';
         
-        if (myInfo && (myInfo.state === 'waiting' || myInfo.state === 'busted')) {
+        if (myInfo && (myInfo.state === 'waiting' || myInfo.state === 'busted' || myInfo.isOffline)) {
            document.getElementById('game-info').innerText = "👀 관전 중: 방장이 [다음 판 딜링하기]를 누르면 자동으로 합류합니다!";
         }
         else if (gameData.currentTurnId === myId) {
