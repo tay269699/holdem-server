@@ -244,7 +244,32 @@
     }
     function closeModal() { document.getElementById('custom-modal-overlay').style.display = 'none'; }
 
-    document.body.addEventListener('click', () => { window.userInteracted = true; }, { once: true });
+    // 브라우저 오디오 권한 강제 해제 (Audio Unlock)
+document.body.addEventListener('click', () => {
+  window.userInteracted = true;
+  
+  // soundPool에 미리 만들어둔 4개의 채널 x 6가지 소리 = 총 24개의 오디오 객체를
+  // 찰나의 순간에 전부 재생했다가 정지시켜서 브라우저로부터 재생 권한을 획득합니다.
+  for (let key in soundPool) {
+    soundPool[key].forEach(audio => {
+      // 볼륨을 0으로 잠시 낮춰서 재생 시 튀는 소리를 방지
+      const originalVolume = audio.volume;
+      audio.volume = 0; 
+      
+      let playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+          audio.volume = originalVolume; // 원래 볼륨으로 복구
+        }).catch(err => {
+          console.warn(`오디오 잠금 해제 실패 (${key}):`, err);
+        });
+      }
+    });
+  }
+  console.log("🔊 오디오 권한 잠금 해제 완료!");
+}, { once: true });
 
     function joinRoom() {
       const roomCode = document.getElementById('room-code').value;
