@@ -36,8 +36,21 @@
     .quick-raise-btn:active { background-color: #9b59b6; }
 
     .custom-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; justify-content: center; align-items: flex-end; z-index: 1000; padding-bottom: 30px; }
-    .custom-modal { background: #2c3e50; border: 2px solid #f1c40f; border-radius: 10px; padding: 20px; width: 90%; max-width: 400px; color: white; font-weight: bold; font-size: 16px; text-align: left; white-space: pre-wrap; line-height: 1.5; box-shadow: 0px -5px 25px rgba(0,0,0,0.8); animation: slideUp 0.3s ease-out; }
-    .custom-modal-btn { background: #f1c40f; color: #333; padding: 10px 20px; width: 100%; margin-top: 15px; font-weight: bold; border-radius: 5px; cursor: pointer; border: none; }
+    .custom-modal { 
+      background: #2c3e50; border: 2px solid #f1c40f; border-radius: 10px; padding: 20px; width: 90%; max-width: 400px; color: white; font-weight: bold; font-size: 16px; text-align: left; white-space: pre-wrap; line-height: 1.5; box-shadow: 0px -5px 25px rgba(0,0,0,0.8); animation: slideUp 0.3s ease-out; 
+      /* 👇 스크롤을 위해 추가된 부분 */
+      max-height: 80vh; 
+      display: flex; 
+      flex-direction: column; 
+    }
+    
+    /* 👇 텍스트 영역에 스크롤바를 만들어주는 부분 (신규 추가) */
+    #custom-modal-text {
+      overflow-y: auto;
+      flex-grow: 1;
+    }
+
+    .custom-modal-btn { background: #f1c40f; color: #333; padding: 10px 20px; width: 100%; margin-top: 15px; font-weight: bold; border-radius: 5px; cursor: pointer; border: none; flex-shrink: 0; }
     @keyframes slideUp { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   </style>
 </head>
