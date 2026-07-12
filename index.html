@@ -184,21 +184,48 @@
     let myId = '';
     let isMyHost = false;
     
-    const sounds = {
-      deal: new Audio('https://actions.google.com/sounds/v1/water/air_release.ogg'), 
-      bet: new Audio('https://actions.google.com/sounds/v1/foley/glass_clink.ogg'), 
-      raise: new Audio('https://actions.google.com/sounds/v1/foley/glass_clink.ogg'), 
-      check: new Audio('https://actions.google.com/sounds/v1/foley/foley_wood_tap.ogg'), 
-      fold: new Audio('https://actions.google.com/sounds/v1/paper/paper_flap.ogg'), 
-      my_turn: new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg') 
+    // [완벽한 사운드 겹침 처리를 위한 오디오 풀(Pool) 구현]
+    const soundUrls = {
+      deal: 'https://actions.google.com/sounds/v1/water/air_release.ogg',
+      bet: 'https://actions.google.com/sounds/v1/foley/glass_clink.ogg',
+      raise: 'https://actions.google.com/sounds/v1/foley/glass_clink.ogg',
+      check: 'https://actions.google.com/sounds/v1/foley/foley_wood_tap.ogg',
+      fold: 'https://actions.google.com/sounds/v1/paper/paper_flap.ogg',
+      my_turn: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg'
     };
 
-    // [버그 수정 1] 사운드 씹힘 현상 해결 (재생 요청 시 객체를 복제하여 겹치게 재생)
+    const soundPool = {};
+    const POOL_SIZE = 4; // 각 효과음당 4개의 동시 재생 채널 준비
+
+    // 페이지 로드 시 사운드 객체를 메모리에 미리 생성해둡니다.
+    for (let key in soundUrls) {
+      soundPool[key] = [];
+      for (let i = 0; i < POOL_SIZE; i++) {
+        let audio = new Audio(soundUrls[key]);
+        audio.preload = 'auto'; // 미리 로딩하여 딜레이 제거
+        audio.volume = 0.5;
+        soundPool[key].push(audio);
+      }
+    }
+
     function playSound(type) {
-      if(sounds[type]) {
-        let audioClone = sounds[type].cloneNode(); // 사운드 객체 복제
-        audioClone.volume = 0.5;
-        audioClone.play().catch(e => console.log("사운드 재생 권한 대기 중 (화면을 한 번 클릭해주세요)"));
+      if (!soundPool[type]) return;
+      
+      // 현재 재생 중이 아닌(쉬고 있는) 오디오 채널 탐색
+      let audio = soundPool[type].find(a => a.paused || a.ended);
+      
+      // 만약 4개 채널이 모두 재생 중이라면, 강제로 첫 번째 채널을 다시 처음부터 재생
+      if (!audio) {
+        audio = soundPool[type][0];
+      }
+      
+      audio.currentTime = 0;
+      let playPromise = audio.play();
+      
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          console.log("사운드 자동재생 차단됨. (화면을 한 번 클릭하면 활성화됩니다)");
+        });
       }
     }
 
