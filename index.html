@@ -511,7 +511,8 @@
 
         if(isTurn) turnPlayerName = p.name;
         const turnClass = isTurn ? 'turn-highlight' : '';
-        const opacity = p.isOffline ? '0.3' : (p.state === 'busted' || p.state === 'waiting') ? '0.5' : '1';
+        // 👇 이 줄을 아래와 같이 수정하세요! (folded 상태일 때도 0.5로 어두워지게 추가)
+        const opacity = p.isOffline ? '0.3' : (p.state === 'busted' || p.state === 'waiting' || p.state === 'folded') ? '0.5' : '1';
 
         let timerBar = '';
         // 🚨 게임이 진행 중(stage 5가 아님)이고 내 턴일 때만 타이머를 보여줍니다!
