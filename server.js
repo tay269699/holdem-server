@@ -220,18 +220,34 @@ function handleAction(room, roomCode, player, data, io) {
         io.to(roomCode).emit('chat_message', { type: 'log', msg: '🔥 전원 올인! 남은 카드를 한 번에 오픈합니다.' });
         processAllInShowdown(io, roomCode); return;
     }
+    
+    // 👇 방금 낸 칩 소리가 잘 들리도록 일단 현재 상태(돈 낸 상태)만 화면에 먼저 쏴줍니다.
+    broadcastGameState(io, roomCode, room);
+    
     if (room.stage < 4) {
-      room.stage++; room.highestBet = 0; 
-      const currBB = (BLIND_STRUCTURE[room.blindLevel] || BLIND_STRUCTURE[BLIND_STRUCTURE.length - 1]).bb;
-      room.lastRaiseAmount = currBB; room.minRaise = currBB; 
-      activePlayers.forEach(id => { room.players[id].currentBet = 0; if (room.players[id].chips > 0) room.players[id].acted = false; });
-      if (room.stage === 1) { room.communityCards.push(room.deck.pop(), room.deck.pop(), room.deck.pop()); } 
-      else if (room.stage === 2 || room.stage === 3) { room.communityCards.push(room.deck.pop()); } 
-      else if (room.stage === 4) { processShowdown(io, roomCode); return; }
-      io.to(roomCode).emit('play_sound', 'deal');
-      findNextTurn(room, activePlayers, true, roomCode, io);
+      // 👇 1초(1000ms) 딜레이를 줍니다.
+      setTimeout(() => {
+        room.stage++; room.highestBet = 0; 
+        const currBB = (BLIND_STRUCTURE[room.blindLevel] || BLIND_STRUCTURE[BLIND_STRUCTURE.length - 1]).bb;
+        room.lastRaiseAmount = currBB; room.minRaise = currBB; 
+        activePlayers.forEach(id => { room.players[id].currentBet = 0; if (room.players[id].chips > 0) room.players[id].acted = false; });
+        
+        if (room.stage === 1) { room.communityCards.push(room.deck.pop(), room.deck.pop(), room.deck.pop()); } 
+        else if (room.stage === 2 || room.stage === 3) { room.communityCards.push(room.deck.pop()); } 
+        else if (room.stage === 4) { processShowdown(io, roomCode); return; }
+        
+        io.to(roomCode).emit('play_sound', 'deal'); // 1초 뒤에 카드 깔리는 소리 재생
+        findNextTurn(room, activePlayers, true, roomCode, io);
+        
+        // 딜레이 후에 변한 상태(새 카드가 깔린 상태)를 다시 화면에 쏴줍니다.
+        broadcastGameState(io, roomCode, room); 
+      }, 1000); 
+      
+      return; // 중요: 아래에 있는 원래의 broadcastGameState가 즉시 실행되지 않도록 여기서 함수를 끝냅니다.
     }
-  } else { findNextTurn(room, activePlayers, false, roomCode, io); }
+  } else { 
+    findNextTurn(room, activePlayers, false, roomCode, io); 
+  }
 
   broadcastGameState(io, roomCode, room);
 }
