@@ -464,7 +464,9 @@
       board.innerHTML = '';
       let turnPlayerName = '';
 
-      Object.values(gameData.players).forEach(p => {
+      gameData.playerOrder.forEach(id => {
+        const p = gameData.players[id];
+        if (!p) return; // 혹시 모를 에러 방지
         const role = p.role ? `<span class="role-badge">${p.role}</span>` : '';
         const isTurn = p.id === gameData.currentTurnId;
         

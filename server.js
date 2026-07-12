@@ -332,7 +332,7 @@ function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
 
 function getGameState(room) {
   return {
-    players: room.players, pot: room.pot, currentTurnId: room.currentTurnId, highestBet: room.highestBet, 
+    players: room.players, playerOrder: room.playerOrder, pot: room.pot, currentTurnId: room.currentTurnId, highestBet: room.highestBet, 
     minRaise: room.minRaise, communityCards: room.communityCards, stage: room.stage, 
     blindLevel: room.blindLevel, blindEndTime: room.blindEndTime, blinds: BLIND_STRUCTURE,
     uncontestedWinner: room.uncontestedWinner
