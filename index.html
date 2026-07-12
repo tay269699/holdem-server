@@ -408,23 +408,27 @@
     });
 
     function updateBlindTimer(level, endTime, blinds) {
+  clearInterval(blindInterval);
+  const curr = blinds[level] || blinds[blinds.length - 1];
+  const next = blinds[Math.min(level + 1, blinds.length - 1)];
+  document.getElementById('current-blind').innerText = `${curr.sb} / ${curr.bb}`;
+  
+  // 👇 시간 계산 로직을 'tick'이라는 묶음으로 분리했습니다.
+  function tick() {
+    const diff = endTime - Date.now();
+    if (diff <= 0) {
+      document.getElementById('blind-countdown').innerText = `(다음 판 ${next.sb}/${next.bb})`;
       clearInterval(blindInterval);
-      const curr = blinds[level] || blinds[blinds.length - 1];
-      const next = blinds[Math.min(level + 1, blinds.length - 1)];
-      document.getElementById('current-blind').innerText = `${curr.sb} / ${curr.bb}`;
-      
-      blindInterval = setInterval(() => {
-        const diff = endTime - Date.now();
-        if (diff <= 0) {
-          document.getElementById('blind-countdown').innerText = `(다음 판 ${next.sb}/${next.bb})`;
-          clearInterval(blindInterval);
-        } else {
-          const m = Math.floor(diff / 60000).toString().padStart(2, '0');
-          const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
-          document.getElementById('blind-countdown').innerText = `${m}:${s}`;
-        }
-      }, 1000);
+    } else {
+      const m = Math.floor(diff / 60000).toString().padStart(2, '0');
+      const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+      document.getElementById('blind-countdown').innerText = `${m}:${s}`;
     }
+  }
+
+  tick(); // 👈 1초를 멍하니 기다리지 않고, 즉시 1번 시간을 화면에 찍어줍니다.
+  blindInterval = setInterval(tick, 1000); // 그 이후부터 1초마다 반복합니다.
+}
 
     function updateGameStateUI(gameData) {
       if(gameData.blindEndTime) updateBlindTimer(gameData.blindLevel, gameData.blindEndTime, gameData.blinds);

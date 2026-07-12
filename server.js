@@ -125,7 +125,7 @@ function processShowdown(io, roomCode) {
     finalMsg += `- ${p.name}: ${evalResult.handName} (${p.cards.map(c => c.suit + c.rank).join(', ')})\n`; 
   });
   finalMsg += `\n🎉 [팟 분배 결과]\n` + msgs.join('\n');
-  io.to(roomCode).emit('update_game_state', getGameState(room));
+  broadcastGameState(io, roomCode, room);
   setTimeout(() => { io.to(roomCode).emit('system_message', finalMsg); }, 1500);
 }
 
@@ -136,7 +136,7 @@ function processAllInShowdown(io, roomCode) {
     room.stage++; room.highestBet = 0; room.lastRaiseAmount = 0;
     if (room.stage === 1) { room.communityCards.push(room.deck.pop(), room.deck.pop(), room.deck.pop()); } 
     else if (room.stage === 2 || room.stage === 3) { room.communityCards.push(room.deck.pop()); }
-    io.to(roomCode).emit('update_game_state', getGameState(room));
+    broadcastGameState(io, roomCode, room);
     io.to(roomCode).emit('play_sound', 'deal'); // 사운드 트리거
     setTimeout(() => processAllInShowdown(io, roomCode), 1500);
   } else { processShowdown(io, roomCode); }
@@ -203,7 +203,7 @@ function handleAction(room, roomCode, player, data, io) {
     const winner = room.players[activePlayers[0]];
     winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id; 
     setTimeout(() => { io.to(roomCode).emit('system_message', `🎉 전원 폴드!\n[${winner.name}]님이 패를 숨긴 채 ${room.pot.toLocaleString()}칩을 가져갑니다.`); }, 500);
-    io.to(roomCode).emit('update_game_state', getGameState(room));
+    broadcastGameState(io, roomCode, room);
     return;
   }
 
@@ -229,7 +229,7 @@ function handleAction(room, roomCode, player, data, io) {
     }
   } else { findNextTurn(room, activePlayers, false, roomCode, io); }
 
-  io.to(roomCode).emit('update_game_state', getGameState(room));
+  broadcastGameState(io, roomCode, room);
 }
 
 function processBotDecision(room, roomCode, bot, io) {
@@ -339,6 +339,28 @@ function getGameState(room) {
   };
 }
 
+// 👇 기존 getGameState 함수 아래에 이 함수를 새로 추가합니다.
+function broadcastGameState(io, roomCode, room) {
+  const baseState = getGameState(room);
+  
+  room.playerOrder.forEach(pId => {
+    let p = room.players[pId];
+    if (!p.isBot && !p.isOffline) {
+      let safeState = JSON.parse(JSON.stringify(baseState)); 
+      
+      // 👇 [초강력 보안 패치] 게임 상태(stage)와 무관하게, '나(pId)'를 제외한 
+      // 모든 사람의 카드 정보는 서버 단에서 100% 영구 삭제하고 보냅니다.
+      Object.keys(safeState.players).forEach(otherId => {
+        if (otherId !== pId) {
+          safeState.players[otherId].cards = []; 
+        }
+      });
+      
+      io.to(pId).emit('update_game_state', safeState);
+    }
+  });
+}
+
 io.on('connection', (socket) => {
   
   socket.on('join_room', (data) => {
@@ -378,7 +400,7 @@ io.on('connection', (socket) => {
         if(room.uncontestedWinner === existingPlayerKey) room.uncontestedWinner = socket.id;
 
         if (room.status === 'playing') {
-          socket.emit('game_started', getGameState(room)); io.to(roomCode).emit('update_game_state', getGameState(room));
+          socket.emit('game_started', getGameState(room)); broadcastGameState(io, roomCode, room);
         } else { io.to(roomCode).emit('update_lobby', Object.values(room.players)); }
         
         io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🚪 ${playerName} 님이 재접속했습니다.` });
@@ -394,7 +416,7 @@ io.on('connection', (socket) => {
     room.playerOrder.push(socket.id);
     
     if (room.status === 'playing') {
-      socket.emit('game_started', getGameState(room)); io.to(roomCode).emit('update_game_state', getGameState(room));
+      socket.emit('game_started', getGameState(room)); broadcastGameState(io, roomCode, room);
     } else { io.to(roomCode).emit('update_lobby', Object.values(room.players)); }
     
     io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🚪 ${playerName} 님이 입장했습니다.` });
@@ -477,7 +499,7 @@ io.on('connection', (socket) => {
                 winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id;
                 setTimeout(() => { io.to(socket.roomCode).emit('system_message', `🎉 전원 폴드!\n[${winner.name}]님이 패를 숨긴 채 ${room.pot}칩을 가져갑니다.`); }, 500);
               }
-              io.to(socket.roomCode).emit('update_game_state', getGameState(room));
+              broadcastGameState(io, socket.roomCode, room);
             }
           }
         }
@@ -518,7 +540,7 @@ io.on('connection', (socket) => {
           p.rebuyCount += 1;
           socket.emit('system_message', "💸 리바이 완료!\n10,000 칩이 즉시 충전되었습니다.");
         }
-        io.to(socket.roomCode).emit('update_game_state', getGameState(room));
+        broadcastGameState(io, socket.roomCode, room);
         io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `💸 ${p.name} 님이 리바이를 요청했습니다.` });
       } else {
         // 전재산이 10,000 이상이면 단호하게 거절 메시지를 보냅니다.
@@ -631,7 +653,7 @@ io.on('connection', (socket) => {
     if (room && room.stage === 5 && room.uncontestedWinner === socket.id) {
       const p = room.players[socket.id]; const cardsStr = p.cards.map(c => c.suit + c.rank).join(', ');
       io.to(socket.roomCode).emit('system_message', `😎 [패 공개] ${p.name}님이 기꺼이 카드를 공개합니다!\n👉 공개된 카드: ${cardsStr}`);
-      room.uncontestedWinner = null; io.to(socket.roomCode).emit('update_game_state', getGameState(room));
+      room.uncontestedWinner = null; broadcastGameState(io, socket.roomCode, room);
     }
   });
 
@@ -639,10 +661,19 @@ io.on('connection', (socket) => {
     const room = rooms[socket.roomCode];
     if (room && room.players[socket.id] && room.players[socket.id].isHost) {
       let results = Object.values(room.players).map(p => {
+        
+        // 👇 게임 진행 중에 종료되었다면, 테이블에 낸 돈(invested)을 임시로 주머니에 돌려받습니다.
+        let safeChips = p.chips;
+        if (room.status === 'playing' && room.stage < 5) {
+          safeChips += p.invested; 
+        }
+
         let totalInvested = 10000 + (p.rebuyCount * 10000);
-        let profit = p.chips - totalInvested;
-        return { name: p.name, chips: p.chips, rebuys: p.rebuyCount, profit: profit };
+        let profit = safeChips - totalInvested; // 환불받은 칩을 기준으로 수익을 계산합니다.
+        
+        return { name: p.name, chips: safeChips, rebuys: p.rebuyCount, profit: profit };
       });
+      // ... 아래 생략 ...
       results.sort((a, b) => b.profit - a.profit);
 
       let finalMsg = `🏆 최종 정산 결과 🏆\n\n`;
@@ -678,7 +709,8 @@ io.on('connection', (socket) => {
       
       player.isOffline = true;
       io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🔌 ${player.name} 님의 연결이 끊겼습니다.` });
-      if (room.status === 'playing' && player.state === 'playing') player.state = 'folded';
+      
+      // [수정됨] 기존에 무조건 폴드시키던 코드를 삭제하고, 아래에서 올인 여부를 검사합니다.
 
       const onlineHumans = room.playerOrder.filter(id => !room.players[id].isOffline && !room.players[id].isBot);
 
@@ -687,24 +719,32 @@ io.on('connection', (socket) => {
       } else {
         if (wasHost) { player.isHost = false; room.players[onlineHumans[0]].isHost = true; }
         
-        // 내 턴이 아니더라도, 게임 중에 도망가면 무조건 '강제 폴드' 처리하여 무임승차 방지
         if (room.status === 'playing' && player.state === 'playing') {
-          if (isMyTurn) {
-            handleAction(room, roomCode, player, { action: 'fold' }, io);
+          // 👇 [올인 보호] 전 재산을 걸었거나, 남은 사람들이 다 올인해서 시스템이 자동 전개 중일 때는 패를 살려둡니다.
+          const activeWithChips = room.playerOrder.filter(id => room.players[id].state === 'playing' && room.players[id].chips > 0);
+          
+          if (player.chips === 0 || activeWithChips.length <= 1) {
+             // 올인 상태이거나 자동 진행 중이므로 패를 꺾지 않고 유지 (결과 화면에서 판정받음)
           } else {
-            player.state = 'folded';
-            // 도망간 후 나 혼자 남았다면 즉시 게임 승리 처리
-            const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline);
-            if (activePlayers.length === 1) {
-              const winner = room.players[activePlayers[0]];
-              winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id;
-              setTimeout(() => { io.to(roomCode).emit('system_message', `🎉 전원 폴드!\n[${winner.name}]님이 패를 숨긴 채 ${room.pot}칩을 가져갑니다.`); }, 500);
+             // 일반적인 상황에서 도망갔을 때는 정상적으로 강제 폴드 처리
+            if (isMyTurn) {
+              handleAction(room, roomCode, player, { action: 'fold' }, io);
+            } else {
+              player.state = 'folded';
+              const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline);
+              if (activePlayers.length === 1) {
+                const winner = room.players[activePlayers[0]];
+                winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id;
+                setTimeout(() => { io.to(roomCode).emit('system_message', `🎉 전원 폴드!\n[${winner.name}]님이 패를 숨긴 채 ${room.pot.toLocaleString()}칩을 가져갑니다.`); }, 500);
+              }
+              // 보안 패치 유지
+              broadcastGameState(io, roomCode, room);
             }
-            io.to(roomCode).emit('update_game_state', getGameState(room));
           }
         } else {
           if (room.status === 'lobby') io.to(roomCode).emit('update_lobby', Object.values(room.players));
-          else io.to(roomCode).emit('update_game_state', getGameState(room));
+          // 보안 패치 유지
+          else broadcastGameState(io, roomCode, room);
         }
       }
     }
