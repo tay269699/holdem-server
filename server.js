@@ -405,11 +405,43 @@ io.on('connection', (socket) => {
     if (room && room.players[socket.id] && room.players[socket.id].isHost && room.status === 'lobby') {
       if (Object.keys(room.players).length >= 10) return socket.emit('system_message', '⚠️ 방이 꽉 찼습니다. (최대 10명)');
       
-      let botCount = Object.values(room.players).filter(p => p.isBot).length;
       let botId = 'bot_' + Math.random().toString(36).substr(2, 9);
       
+      // 형용사 50개 (홀덤 상황 + 성격 조합)
+      const adjectives = [
+        '올인하는', '뻥카치는', '눈치보는', '대담한', '소심한', 
+        '운좋은', '돈많은', '파산한', '깐깐한', '졸린', 
+        '배고픈', '쫄보인', '블러핑하는', '레이즈하는', '폴드하는', 
+        '고민하는', '계산적인', '배짱좋은', '본전찾는', '잃을것없는', 
+        '건방진', '친절한', '화난', '멍청한', '똑똑한', 
+        '수상한', '억울한', '행복한', '슬픈', '바쁜', 
+        '심심한', '귀여운', '무서운', '수줍은', '뻔뻔한', 
+        '게으른', '성급한', '느긋한', '예민한', '둔감한', 
+        '변덕스러운', '음흉한', '시크한', '엉뚱한', '침착한', 
+        '허세부리는', '기대하는', '절망한', '신난', '초조한'
+      ];
+
+      // 명사 50개 (친근하고 귀여운 동물들)
+      const nouns = [
+        '알파카', '너구리', '고양이', '강아지', '거북이', 
+        '펭귄', '호랑이', '병아리', '다람쥐', '토끼', 
+        '원숭이', '사자', '곰', '여우', '늑대', 
+        '돼지', '흑염소', '망아지', '양', '수탉', 
+        '오리', '비둘기', '참새', '까마귀', '부엉이', 
+        '개구리', '악어', '상어', '고래', '돌고래', 
+        '문어', '오징어', '꽃게', '랍스터', '달팽이', 
+        '햄스터', '고슴도치', '코끼리', '기린', '하마', 
+        '코뿔소', '침팬지', '고릴라', '미어캣', '캥거루', 
+        '코알라', '독수리', '펠리컨', '두꺼비', '카멜레온'
+      ];
+
+      // 리스트에서 각각 하나씩 랜덤으로 뽑아서 이름 조합
+      const randomAdj = adjectives[Math.floor(Math.random() * adjectives.length)];
+      const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
+      const botName = `🤖 ${randomAdj} ${randomNoun}`;
+      
       room.players[botId] = {
-        id: botId, name: `🤖 봇 ${botCount + 1}호`, chips: 10000,
+        id: botId, name: botName, chips: 10000,
         isHost: false, cards: [], currentBet: 0, invested: 0, state: 'waiting', 
         acted: false, rebuyCount: 0, pendingRebuy: 0, isOffline: false, isBot: true
       };
@@ -434,11 +466,18 @@ io.on('connection', (socket) => {
         } else {
           target.isOffline = true;
           if (target.state === 'playing') {
-            // 본인 차례일 때만 액션(폴드)을 처리하고, 아닐 때는 상태만 죽은 것(folded)으로 바꿈
             if (room.currentTurnId === target.id) {
               handleAction(room, socket.roomCode, target, { action: 'fold' }, io);
             } else {
               target.state = 'folded';
+              // 강퇴 후 남은 사람이 1명뿐인지 확인하고, 화면을 즉시 새로고침
+              const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline);
+              if (activePlayers.length === 1) {
+                const winner = room.players[activePlayers[0]];
+                winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id;
+                setTimeout(() => { io.to(socket.roomCode).emit('system_message', `🎉 전원 폴드!\n[${winner.name}]님이 패를 숨긴 채 ${room.pot}칩을 가져갑니다.`); }, 500);
+              }
+              io.to(socket.roomCode).emit('update_game_state', getGameState(room));
             }
           }
         }
@@ -462,20 +501,22 @@ io.on('connection', (socket) => {
   socket.on('rebuy', () => {
     const room = rooms[socket.roomCode];
     if (room && room.players[socket.id]) {
-      if (room.status === 'playing' && room.stage < 5) {
-        // 예약이 안 되어 있고(0이거나 undefined), 칩이 10000 미만일 때만 1번 예약되도록 변경
-        if (!room.players[socket.id].pendingRebuy && room.players[socket.id].chips < 10000) {
-            room.players[socket.id].pendingRebuy = 1;
+      const p = room.players[socket.id];
+      
+      // [버그 수정] 현재 가진 칩과 '예약된 칩(10000)'을 합친 미래의 총 칩을 계산합니다.
+      const totalFutureChips = p.chips + (p.pendingRebuy ? 10000 : 0);
+      
+      // 예약분까지 합쳐서 10,000 미만일 때만 충전을 허락합니다.
+      if (totalFutureChips < 10000) {
+        if (room.status === 'playing' && room.stage < 5) {
+          p.pendingRebuy = 1;
+        } else {
+          p.chips += 10000;
+          p.rebuyCount += 1;
         }
-      } else {
-        // [새로 추가된 방어막] 칩이 10,000 미만일 때만 리바이(10,000칩 추가)를 허용합니다.
-        if (room.players[socket.id].chips < 10000) {
-          room.players[socket.id].chips += 10000; 
-          room.players[socket.id].rebuyCount += 1;
-        }
+        io.to(socket.roomCode).emit('update_game_state', getGameState(room));
+        io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `💸 ${p.name} 님이 리바이를 요청했습니다.` });
       }
-      io.to(socket.roomCode).emit('update_game_state', getGameState(room));
-      io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `💸 ${room.players[socket.id].name} 님이 리바이를 요청했습니다.` });
     }
   });
 
@@ -517,8 +558,16 @@ io.on('connection', (socket) => {
         activeIds.length = 0;
         activeIds.push(...room.playerOrder.filter(id => room.players[id].chips > 0 && !room.players[id].isOffline));
       } else if (isNextHand && room.dealerId) {
-        let prevDIdx = activeIds.indexOf(room.dealerId);
-        dIdx = prevDIdx !== -1 ? (prevDIdx + 1) % activeIds.length : 0;
+        let prevDIdx = room.playerOrder.indexOf(room.dealerId);
+        let nextDIdx = prevDIdx;
+        // 파산한 사람을 건너뛰고, 실제 게임 중인 다음 사람에게 딜러 버튼을 정확히 넘겨줌
+        for (let i = 0; i < room.playerOrder.length; i++) {
+          nextDIdx = (nextDIdx + 1) % room.playerOrder.length;
+          if (activeIds.includes(room.playerOrder[nextDIdx])) {
+            dIdx = activeIds.indexOf(room.playerOrder[nextDIdx]);
+            break;
+          }
+        }
       }
       room.dealerId = activeIds[dIdx];
 
@@ -631,9 +680,21 @@ io.on('connection', (socket) => {
       } else {
         if (wasHost) { player.isHost = false; room.players[onlineHumans[0]].isHost = true; }
         
-        // [핵심 수정] 턴인 사람이 나갔을 때 복잡하게 턴을 넘기지 않고, '자동 폴드' 처리하여 메인 시스템(handleAction)에 넘깁니다.
-        if (room.status === 'playing' && isMyTurn) {
-          handleAction(room, roomCode, player, { action: 'fold' }, io);
+        // 내 턴이 아니더라도, 게임 중에 도망가면 무조건 '강제 폴드' 처리하여 무임승차 방지
+        if (room.status === 'playing' && player.state === 'playing') {
+          if (isMyTurn) {
+            handleAction(room, roomCode, player, { action: 'fold' }, io);
+          } else {
+            player.state = 'folded';
+            // 도망간 후 나 혼자 남았다면 즉시 게임 승리 처리
+            const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline);
+            if (activePlayers.length === 1) {
+              const winner = room.players[activePlayers[0]];
+              winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id;
+              setTimeout(() => { io.to(roomCode).emit('system_message', `🎉 전원 폴드!\n[${winner.name}]님이 패를 숨긴 채 ${room.pot}칩을 가져갑니다.`); }, 500);
+            }
+            io.to(roomCode).emit('update_game_state', getGameState(room));
+          }
         } else {
           if (room.status === 'lobby') io.to(roomCode).emit('update_lobby', Object.values(room.players));
           else io.to(roomCode).emit('update_game_state', getGameState(room));

@@ -293,7 +293,15 @@
     function kickPlayer(id) { if(confirm("이 플레이어를 강퇴하시겠습니까?")) socket.emit('kick_player', id); }
 
     function startGame() { socket.emit('start_game'); }
-    function requestRebuy() { socket.emit('rebuy'); showCustomAlert("💸 충전 완료.\n진행 중인 판이 끝나면 적용됩니다."); }
+    function requestRebuy() {
+      // 내 칩이 10,000 이상이면 서버에 요청조차 하지 않고 거절 모달을 띄웁니다.
+      if (uiMyChips >= 10000) {
+        showCustomAlert("⚠️ 충전 불가\n보유 칩이 10,000 미만일 때만 사용할 수 있습니다.");
+      } else {
+        socket.emit('rebuy'); 
+        showCustomAlert("💸 리바이 요청 완료!\n조건이 맞으면 즉시 또는 다음 판에 충전됩니다."); 
+      }
+    }
     function endGame() { if(confirm("게임을 종료하고 최종 정산을 진행하시겠습니까?")) socket.emit('end_game'); }
 
     function sendChat() {
