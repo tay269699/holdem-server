@@ -61,6 +61,9 @@
     <h2>대기실 (<span id="lobby-room-code"></span>)</h2>
     <ul class="player-list" id="lobby-players"></ul>
     <div id="host-controls" style="display: none;">
+      <!-- [신규] 방장용 봇 추가 버튼 -->
+      <button onclick="addBot()" style="background-color: #8e44ad; color: white; margin-bottom: 10px;">🤖 봇(AI) 추가</button>
+      <br>
       <button onclick="startGame()" style="background-color: #e67e22; color: white;">🚀 게임 시작</button>
     </div>
     <div id="guest-waiting" style="display: none;"><p>방장이 시작할 때까지 대기 중...</p></div>
@@ -145,7 +148,6 @@
         <div><span class="term">스트레이트 플러시</span> 무늬 같고 숫자 연속 <span class="example">(최강)</span></div>
       </div>
 
-      <!-- [신규] 재접속 가이드 영역 추가 -->
       <div style="border-top: 1px dashed #1abc9c; padding-top: 10px; margin-top: 10px; font-size: 13px;">
         <div style="color: #e74c3c; font-weight: bold; margin-bottom: 5px;">🔌 접속 종료(튕김) 및 재접속 안내</div>
         <div style="margin-bottom: 5px; color: #bdc3c7;">
@@ -183,6 +185,9 @@
     }
 
     socket.on('join_error', (msg) => { alert(msg); window.location.reload(); });
+
+    // [신규] 봇 추가 함수
+    function addBot() { socket.emit('add_bot'); }
 
     function startGame() { socket.emit('start_game'); }
     function requestRebuy() { socket.emit('rebuy'); showCustomAlert("💸 충전 완료.\n진행 중인 판이 끝나면 적용됩니다."); }
@@ -241,7 +246,6 @@
       let myInfo = players.find(p => p.id === myId);
 
       players.forEach(p => {
-        // [업데이트] 로비 화면에서도 오프라인(튕긴) 유저 상태를 표시
         const crown = p.isHost ? '👑' : '';
         const offlineMark = p.isOffline ? ' <span style="color:#e74c3c; font-size:12px;">(오프라인)</span>' : '';
         ul.innerHTML += `<li>${crown} ${p.name}${offlineMark}</li>`;
@@ -346,7 +350,6 @@
 
         if(isTurn) turnPlayerName = p.name;
         const turnClass = isTurn ? 'turn-highlight' : '';
-        // 오프라인 유저는 더 투명하게 처리
         const opacity = p.isOffline ? '0.3' : (p.state === 'busted' || p.state === 'waiting') ? '0.5' : '1';
 
         board.innerHTML += `
