@@ -503,19 +503,23 @@ io.on('connection', (socket) => {
     if (room && room.players[socket.id]) {
       const p = room.players[socket.id];
       
-      // [버그 수정] 현재 가진 칩과 '예약된 칩(10000)'을 합친 미래의 총 칩을 계산합니다.
-      const totalFutureChips = p.chips + (p.pendingRebuy ? 10000 : 0);
+      // 현재 칩 + 이번 판에 이미 베팅한 칩(invested) + 예약된 칩을 모두 합쳐 진짜 재산을 계산합니다.
+      const totalWealth = p.chips + p.invested + (p.pendingRebuy ? 10000 : 0);
       
-      // 예약분까지 합쳐서 10,000 미만일 때만 충전을 허락합니다.
-      if (totalFutureChips < 10000) {
+      if (totalWealth < 10000) {
         if (room.status === 'playing' && room.stage < 5) {
           p.pendingRebuy = 1;
+          socket.emit('system_message', "💸 리바이 예약 완료!\n이번 판이 끝나고 다음 판이 시작될 때 충전됩니다.");
         } else {
           p.chips += 10000;
           p.rebuyCount += 1;
+          socket.emit('system_message', "💸 리바이 완료!\n10,000 칩이 즉시 충전되었습니다.");
         }
         io.to(socket.roomCode).emit('update_game_state', getGameState(room));
         io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `💸 ${p.name} 님이 리바이를 요청했습니다.` });
+      } else {
+        // 전재산이 10,000 이상이면 단호하게 거절 메시지를 보냅니다.
+        socket.emit('system_message', "⚠️ 충전 불가\n현재 보유 칩(베팅 중인 칩 포함)이 10,000 이상이므로 충전할 수 없습니다.");
       }
     }
   });
