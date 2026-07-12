@@ -467,7 +467,7 @@ io.on('connection', (socket) => {
         let profit = p.chips - totalInvested;
         return { name: p.name, chips: p.chips, rebuys: p.rebuyCount, profit: profit };
       });
-      results.sort((a, b) => b.chips - a.chips);
+      results.sort((a, b) => b.profit - a.profit);
 
       let finalMsg = `🏆 최종 정산 결과 🏆\n\n`;
       const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
