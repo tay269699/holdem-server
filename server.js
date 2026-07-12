@@ -144,6 +144,10 @@ function processAllInShowdown(io, roomCode) {
 
 function handleAction(room, roomCode, player, data, io) {
   if(!room || room.status !== 'playing' || room.currentTurnId !== player.id) return; 
+  
+  // 유저가 버튼을 눌러 액션을 취하면 째깍거리던 타이머를 즉시 정지시킵니다
+  if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
+  
   player.acted = true; 
   let actionLog = '';
 
@@ -316,10 +320,8 @@ function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
   if(!nextFound) room.currentTurnId = null;
 
   if (room.currentTurnId && room.players[room.currentTurnId].isBot) {
-    const expectedTurnId = room.currentTurnId; // 타이머를 시작할 때의 봇 ID를 기억해둡니다.
-    
+    const expectedTurnId = room.currentTurnId;
     setTimeout(() => {
-      // 시간이 지난 후에도 방이 존재하고, 현재 턴이 방금 기억해둔 그 봇의 턴이 맞을 때만 실행합니다.
       if (rooms[roomCode] === room && room.currentTurnId === expectedTurnId) {
         let bot = room.players[room.currentTurnId];
         if (bot && bot.isBot) processBotDecision(room, roomCode, bot, io);
@@ -327,6 +329,24 @@ function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
     }, 1500 + Math.random() * 1000);
   } else if (room.currentTurnId) {
     io.to(room.currentTurnId).emit('play_sound', 'my_turn');
+    
+    // [신규] 유저 턴 시작! 20초 제한 타이머 카운트다운
+    const expectedTurnId = room.currentTurnId;
+    room.turnStartTime = Date.now();
+    if (room.turnTimer) clearTimeout(room.turnTimer);
+    
+    room.turnTimer = setTimeout(() => {
+      if (rooms[roomCode] === room && room.currentTurnId === expectedTurnId) {
+        let p = room.players[expectedTurnId];
+        let callAmount = room.highestBet - p.currentBet;
+        
+        // 시간 초과 시 낼 돈이 없으면 체크, 낼 돈이 있으면 폴드 강제 처리
+        let timeoutAction = callAmount === 0 ? 'call' : 'fold';
+        handleAction(room, roomCode, p, { action: timeoutAction }, io);
+        
+        io.to(roomCode).emit('chat_message', { type: 'sys', msg: `⏰ [${p.name}] 님이 시간 초과로 자동 진행(폴드/체크) 되었습니다.` });
+      }
+    }, 20000); // 20초 (20000ms) 설정
   }
 }
 
@@ -335,28 +355,30 @@ function getGameState(room) {
     players: room.players, playerOrder: room.playerOrder, pot: room.pot, currentTurnId: room.currentTurnId, highestBet: room.highestBet, 
     minRaise: room.minRaise, communityCards: room.communityCards, stage: room.stage, 
     blindLevel: room.blindLevel, blindEndTime: room.blindEndTime, blinds: BLIND_STRUCTURE,
-    uncontestedWinner: room.uncontestedWinner
+    uncontestedWinner: room.uncontestedWinner, turnStartTime: room.turnStartTime
   };
 }
 
-// 👇 기존 getGameState 함수 아래에 이 함수를 새로 추가합니다.
+// 나를 제외한 남의 카드를 완벽하게 지워주는 보안(Anti-Cheat) 전용 함수
+function getSafeGameState(room, myId) {
+  let safeState = JSON.parse(JSON.stringify(getGameState(room)));
+  Object.keys(safeState.players).forEach(otherId => {
+    if (otherId !== myId) {
+      safeState.players[otherId].cards = []; 
+    } else if (safeState.players[myId].cards.length > 0) {
+      // 내 카드가 있으면 현재 바닥 카드와 조합하여 족보를 계산해 줍니다
+      let evalResult = evaluateHand(safeState.players[myId].cards, safeState.communityCards);
+      safeState.players[myId].handName = evalResult.handName;
+    }
+  });
+  return safeState;
+}
+
 function broadcastGameState(io, roomCode, room) {
-  const baseState = getGameState(room);
-  
   room.playerOrder.forEach(pId => {
     let p = room.players[pId];
     if (!p.isBot && !p.isOffline) {
-      let safeState = JSON.parse(JSON.stringify(baseState)); 
-      
-      // 👇 [초강력 보안 패치] 게임 상태(stage)와 무관하게, '나(pId)'를 제외한 
-      // 모든 사람의 카드 정보는 서버 단에서 100% 영구 삭제하고 보냅니다.
-      Object.keys(safeState.players).forEach(otherId => {
-        if (otherId !== pId) {
-          safeState.players[otherId].cards = []; 
-        }
-      });
-      
-      io.to(pId).emit('update_game_state', safeState);
+      io.to(pId).emit('update_game_state', getSafeGameState(room, pId));
     }
   });
 }
@@ -400,7 +422,7 @@ io.on('connection', (socket) => {
         if(room.uncontestedWinner === existingPlayerKey) room.uncontestedWinner = socket.id;
 
         if (room.status === 'playing') {
-          socket.emit('game_started', getGameState(room)); broadcastGameState(io, roomCode, room);
+          socket.emit('game_started', getSafeGameState(room, socket.id)); broadcastGameState(io, roomCode, room);
         } else { io.to(roomCode).emit('update_lobby', Object.values(room.players)); }
         
         io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🚪 ${playerName} 님이 재접속했습니다.` });
@@ -416,7 +438,7 @@ io.on('connection', (socket) => {
     room.playerOrder.push(socket.id);
     
     if (room.status === 'playing') {
-      socket.emit('game_started', getGameState(room)); broadcastGameState(io, roomCode, room);
+      socket.emit('game_started', getSafeGameState(room, socket.id)); broadcastGameState(io, roomCode, room);
     } else { io.to(roomCode).emit('update_lobby', Object.values(room.players)); }
     
     io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🚪 ${playerName} 님이 입장했습니다.` });
@@ -626,7 +648,14 @@ io.on('connection', (socket) => {
         else if (idx === dIdx) { p.role = 'D'; }
       });
 
-      io.to(socket.roomCode).emit('game_started', getGameState(room));
+      // 방 전체에 뿌리지 않고, 각자에게 본인 카드만 보이는 안전한 상태로 개별 전송합니다.
+      room.playerOrder.forEach(pId => {
+        let p = room.players[pId];
+        if (!p.isBot && !p.isOffline) {
+          io.to(pId).emit('game_started', getSafeGameState(room, pId));
+        }
+      });
+      
       io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `📢 새로운 판이 시작되었습니다!` });
       io.to(socket.roomCode).emit('play_sound', 'deal');
       
