@@ -454,10 +454,18 @@
       if (myInfo && myInfo.handName) document.getElementById('my-hand-guide').innerText = `(${myInfo.handName})`;
       else document.getElementById('my-hand-guide').innerText = '';
 
-      // [수정됨] 내 카드 애니메이션 중복 방지 (기존 카드는 두고, 새 카드만 옆에 끼워 넣기)
+      // [수정됨] 내 카드 애니메이션 중복 방지 및 새 판 시작 시 화면 초기화 완벽 적용
       if (!myInfo || !myInfo.cards || myInfo.cards.length === 0) {
         container.innerHTML = ''; 
       } else {
+        // 👇 새로 추가된 핵심 로직: 서버에서 받은 새 첫 번째 카드와, 내 화면에 떠 있는 첫 번째 카드가 다르면 (즉, 새 판이 시작된 거라면) 기존 카드를 싹 지워줍니다.
+        let firstCardStr = myInfo.cards[0].suit + myInfo.cards[0].rank;
+        let currentFirstCardDOM = container.children[0] ? container.children[0].innerText : '';
+        
+        if (currentFirstCardDOM !== firstCardStr) {
+          container.innerHTML = '';
+        }
+
         if (container.children.length > myInfo.cards.length) container.innerHTML = ''; // 꼬임 방지용 초기화
         let startIndex = container.children.length; // 현재 화면에 있는 카드 개수 확인
         for (let i = startIndex; i < myInfo.cards.length; i++) {
