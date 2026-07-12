@@ -94,7 +94,7 @@ function distributePots(room) {
   pots.forEach((pot, index) => {
     if (pot.eligible.length === 1) {
       let winner = pot.eligible[0]; winner.chips += pot.amount;
-      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount}칩): ${winner.name}` : `총 팟(${pot.amount}칩): ${winner.name}`);
+      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount.toLocaleString()}칩): ${winner.name}` : `총 팟(${pot.amount.toLocaleString()}칩): ${winner.name}`);
     } else if (pot.eligible.length > 1) {
       let results = pot.eligible.map(p => {
         let evalResult = evaluateHand(p.cards, room.communityCards);
@@ -109,7 +109,7 @@ function distributePots(room) {
         w.pRef.chips += splitAmount; 
         if (idx === 0) w.pRef.chips += remainder; // 남은 짜투리 칩은 무승부 승자 중 첫 번째 사람에게 지급
       });
-      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})` : `총 팟(${pot.amount}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})`);
+      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount.toLocaleString()}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})` : `총 팟(${pot.amount.toLocaleString()}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})`);
     }
   });
   return msgs;
@@ -152,7 +152,7 @@ function handleAction(room, roomCode, player, data, io) {
     if(callAmount > 0) {
       if(callAmount > player.chips) callAmount = player.chips; 
       player.chips -= callAmount; player.currentBet += callAmount; player.invested += callAmount; room.pot += callAmount;
-      actionLog = `[${player.name}] 님이 콜을 받았습니다. (${callAmount}칩)`;
+      actionLog = `[${player.name}] 님이 콜을 받았습니다. (${callAmount.toLocaleString()}칩)`;
       io.to(roomCode).emit('play_sound', 'bet');
     } else {
       actionLog = `[${player.name}] 님이 체크했습니다.`;
@@ -178,7 +178,7 @@ function handleAction(room, roomCode, player, data, io) {
     player.chips -= cost; player.currentBet += cost; player.invested += cost; room.pot += cost; 
     
     let isAllIn = player.chips === 0;
-    actionLog = isAllIn ? `🔥 [${player.name}] 님이 올인했습니다! (${cost}칩)` : `📈 [${player.name}] 님이 레이즈했습니다. (총 ${raiseAmount}칩)`;
+    actionLog = isAllIn ? `🔥 [${player.name}] 님이 올인했습니다! (${cost.toLocaleString()}칩)` : `📈 [${player.name}] 님이 레이즈했습니다. (총 ${raiseAmount.toLocaleString()}칩)`;
     io.to(roomCode).emit('play_sound', 'raise');
 
     if (raiseAmount > room.highestBet) {
@@ -202,7 +202,7 @@ function handleAction(room, roomCode, player, data, io) {
   if (activePlayers.length === 1) {
     const winner = room.players[activePlayers[0]];
     winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id; 
-    setTimeout(() => { io.to(roomCode).emit('system_message', `🎉 전원 폴드!\n[${winner.name}]님이 패를 숨긴 채 ${room.pot}칩을 가져갑니다.`); }, 500);
+    setTimeout(() => { io.to(roomCode).emit('system_message', `🎉 전원 폴드!\n[${winner.name}]님이 패를 숨긴 채 ${room.pot.toLocaleString()}칩을 가져갑니다.`); }, 500);
     io.to(roomCode).emit('update_game_state', getGameState(room));
     return;
   }
@@ -503,8 +503,11 @@ io.on('connection', (socket) => {
     if (room && room.players[socket.id]) {
       const p = room.players[socket.id];
       
-      // 현재 칩 + 이번 판에 이미 베팅한 칩(invested) + 예약된 칩을 모두 합쳐 진짜 재산을 계산합니다.
-      const totalWealth = p.chips + p.invested + (p.pendingRebuy ? 10000 : 0);
+      // [오류 수정] 결과창(stage 5)에서는 이미 남에게 넘어간 돈이므로 베팅 금액(invested)을 재산에서 뺍니다.
+      const currentInvested = (room.status === 'playing' && room.stage < 5) ? p.invested : 0;
+      
+      // 진짜 남은 칩 + 아직 승부가 안 난 베팅 칩 + 예약 칩 합산
+      const totalWealth = p.chips + currentInvested + (p.pendingRebuy ? 10000 : 0);
       
       if (totalWealth < 10000) {
         if (room.status === 'playing' && room.stage < 5) {
