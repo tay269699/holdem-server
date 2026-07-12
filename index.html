@@ -308,9 +308,14 @@
     socket.on('chat_message', (data) => {
       const ul = document.getElementById('chat-messages');
       const li = document.createElement('li');
-      if(data.type === 'sys') li.innerHTML = `<span class="msg-sys">${data.msg}</span>`;
-      else if(data.type === 'log') li.innerHTML = `<span class="msg-log">${data.msg}</span>`;
-      else li.innerHTML = `<strong>${data.name}:</strong> ${data.msg}`;
+      
+      // 태그(HTML) 입력을 텍스트로 변환하여 해킹 및 화면 깨짐 방지
+      const safeMsg = data.msg.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const safeName = data.name ? data.name.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
+
+      if(data.type === 'sys') li.innerHTML = `<span class="msg-sys">${safeMsg}</span>`;
+      else if(data.type === 'log') li.innerHTML = `<span class="msg-log">${safeMsg}</span>`;
+      else li.innerHTML = `<strong>${safeName}:</strong> ${safeMsg}`;
       
       ul.appendChild(li);
       ul.scrollTop = ul.scrollHeight; 
@@ -325,6 +330,8 @@
       const raiseAmt = parseInt(document.getElementById('raise-amount').value);
       if (isNaN(raiseAmt) || raiseAmt < currentMinRaise) {
         if(raiseAmt !== (uiMyChips + uiMyCurrentBet)) { 
+          // 에러 메시지를 띄우기 전에, 입력창의 숫자를 최소 금액으로 강제 변경해줌
+          document.getElementById('raise-amount').value = currentMinRaise;
           return showCustomAlert(`⚠️ 룰 위반\n최소 ${currentMinRaise}칩 이상으로 레이즈해야 합니다!`);
         }
       }

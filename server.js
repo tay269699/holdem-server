@@ -103,7 +103,12 @@ function distributePots(room) {
       results.sort((a, b) => b.score - a.score);
       let highestScore = results[0].score; let winners = results.filter(r => r.score === highestScore);
       let splitAmount = Math.floor(pot.amount / winners.length);
-      winners.forEach(w => { w.pRef.chips += splitAmount; });
+      let remainder = pot.amount % winners.length; // 나누고 남은 짜투리 칩 계산
+      
+      winners.forEach((w, idx) => { 
+        w.pRef.chips += splitAmount; 
+        if (idx === 0) w.pRef.chips += remainder; // 남은 짜투리 칩은 무승부 승자 중 첫 번째 사람에게 지급
+      });
       msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})` : `총 팟(${pot.amount}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})`);
     }
   });
@@ -232,61 +237,94 @@ function processBotDecision(room, roomCode, bot, io) {
 
   const callAmount = room.highestBet - bot.currentBet;
   let action = 'fold'; let raiseAmt = 0;
+  let rand = Math.random(); // 0~1 사이의 난수 (봇의 변덕)
 
-  if (callAmount === 0) {
-    action = 'call'; 
-  } else {
-    if (room.stage === 0) { 
-      let v1 = rankValues[bot.cards[0].rank];
-      let v2 = rankValues[bot.cards[1].rank];
-      if (v1 === v2 || Math.max(v1, v2) >= 10) { action = 'call'; }
-    } else { 
-      let evalResult = evaluateHand(bot.cards, room.communityCards);
-      if (evalResult.level >= 3) { action = 'raise'; raiseAmt = room.minRaise * 2; } 
-      else if (evalResult.level >= 1) { if (callAmount <= bot.chips * 0.4) action = 'call'; } 
+  if (room.stage === 0) {
+    // [1] 프리플랍 (시작 카드 2장만 있는 상태)
+    let v1 = rankValues[bot.cards[0].rank];
+    let v2 = rankValues[bot.cards[1].rank];
+    let maxV = Math.max(v1, v2);
+
+    if (v1 === v2 && v1 >= 10) { 
+      action = 'raise'; raiseAmt = room.minRaise * 2; // QQ, KK, AA면 크게 레이즈
+    } else if (v1 === v2 || maxV >= 10) { 
+      action = 'call'; 
+      if (callAmount === 0 && rand < 0.2) { action = 'raise'; raiseAmt = room.minRaise; } // 20% 확률로 삥(블러핑)
+    } else {
+      // 안 좋은 카드일 때
+      if (callAmount === 0 || callAmount <= room.minRaise) { action = 'call'; } // 공짜거나 싸면 일단 봄
+      else if (rand < 0.1) { action = 'call'; } // 10% 확률로 무지성 콜
+    }
+  } else { 
+    // [2] 플랍 이후 (바닥 카드가 깔린 상태)
+    let evalResult = evaluateHand(bot.cards, room.communityCards);
+
+    if (evalResult.level >= 3) { // 트리플 이상 (매우 강력함)
+      action = 'raise';
+      raiseAmt = rand < 0.5 ? room.minRaise * 2 : room.minRaise * 3;
+    } 
+    else if (evalResult.level >= 1) { // 원페어/투페어
+      if (callAmount === 0) {
+        action = rand < 0.4 ? 'raise' : 'call'; // 40% 확률로 블러핑 레이즈
+        raiseAmt = room.minRaise;
+      } else if (callAmount <= bot.chips * 0.5) { // 내 남은 칩의 50% 이하 베팅이면 따라감
+        action = 'call';
+      }
+    } 
+    else { // 족보가 없을 때(하이카드)
+      if (callAmount === 0) {
+         action = rand < 0.2 ? 'raise' : 'call'; // 20% 확률로 약한 뻥카
+         raiseAmt = room.minRaise;
+      }
     }
   }
 
-  // [버그 수정 적용 완료] 봇이 레이즈 금액이 칩보다 클 때 올인하도록 수정
-  if (action === 'raise' && raiseAmt >= bot.chips) { 
-    raiseAmt = bot.chips; 
-  }
-  
+  // [공통 보정] 올인 규칙 및 눈치(체크) 적용
+  if (action === 'raise' && raiseAmt >= bot.chips) { raiseAmt = bot.chips + bot.currentBet; }
+  // 폴드할 상황인데 앞에 낸 돈이 없으면 굳이 안 죽고 체크(콜)로 묻어감
+  if (action === 'fold' && callAmount === 0) { action = 'call'; } 
+
   handleAction(room, roomCode, bot, { action, amount: raiseAmt }, io);
 }
 
 function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
   if (activePlayers.length === 0) { room.currentTurnId = null; return; }
 
-  let turnIdx = 0;
+  let currentOrderIdx = 0;
   if (isNewStage) {
-    let dealerIdx = activePlayers.indexOf(room.dealerId);
-    turnIdx = dealerIdx === -1 ? 0 : dealerIdx; 
+    currentOrderIdx = room.playerOrder.indexOf(room.dealerId);
   } else {
-    turnIdx = activePlayers.indexOf(room.currentTurnId);
-    if (turnIdx === -1) turnIdx = 0;
+    currentOrderIdx = room.playerOrder.indexOf(room.currentTurnId);
   }
 
   let nextFound = false;
-  for(let i=0; i<activePlayers.length; i++) {
-    turnIdx = (turnIdx + 1) % activePlayers.length;
-    let nextP = room.players[activePlayers[turnIdx]];
-    
-    if (nextP.state === 'playing' && nextP.chips > 0 && !nextP.isOffline) {
-      if (!nextP.acted || nextP.currentBet < room.highestBet) {
-        room.currentTurnId = nextP.id; nextFound = true; break;
+  for(let i = 0; i < room.playerOrder.length; i++) {
+    currentOrderIdx = (currentOrderIdx + 1) % room.playerOrder.length;
+    let nextPId = room.playerOrder[currentOrderIdx];
+
+    if (activePlayers.includes(nextPId)) {
+      let nextP = room.players[nextPId];
+      if (nextP.state === 'playing' && nextP.chips > 0 && !nextP.isOffline) {
+        if (!nextP.acted || nextP.currentBet < room.highestBet) {
+          room.currentTurnId = nextP.id;
+          nextFound = true;
+          break;
+        }
       }
     }
   }
-  if(!nextFound) room.currentTurnId = null; 
+  if(!nextFound) room.currentTurnId = null;
 
   if (room.currentTurnId && room.players[room.currentTurnId].isBot) {
+    const expectedTurnId = room.currentTurnId; // 타이머를 시작할 때의 봇 ID를 기억해둡니다.
+    
     setTimeout(() => {
-      if (rooms[roomCode] === room && room.currentTurnId) {
+      // 시간이 지난 후에도 방이 존재하고, 현재 턴이 방금 기억해둔 그 봇의 턴이 맞을 때만 실행합니다.
+      if (rooms[roomCode] === room && room.currentTurnId === expectedTurnId) {
         let bot = room.players[room.currentTurnId];
         if (bot && bot.isBot) processBotDecision(room, roomCode, bot, io);
       }
-    }, 1500 + Math.random() * 1000); // 봇 턴에 약간의 딜레이를 주어 자연스럽게 연출
+    }, 1500 + Math.random() * 1000);
   } else if (room.currentTurnId) {
     io.to(room.currentTurnId).emit('play_sound', 'my_turn');
   }
@@ -394,22 +432,30 @@ io.on('connection', (socket) => {
           room.playerOrder = room.playerOrder.filter(id => id !== targetId);
           io.to(socket.roomCode).emit('update_lobby', Object.values(room.players));
         } else {
-          // 게임 중 강퇴는 오프라인(자동 폴드) 처리하여 로직 꼬임 방지
           target.isOffline = true;
           if (target.state === 'playing') {
-            handleAction(room, socket.roomCode, target, { action: 'fold' }, io);
+            // 본인 차례일 때만 액션(폴드)을 처리하고, 아닐 때는 상태만 죽은 것(folded)으로 바꿈
+            if (room.currentTurnId === target.id) {
+              handleAction(room, socket.roomCode, target, { action: 'fold' }, io);
+            } else {
+              target.state = 'folded';
+            }
           }
         }
       }
     }
   });
 
-  // [신규] 채팅 메시지 수신 및 브로드캐스트
+  // [신규] 채팅 메시지 수신 및 브로드캐스트 (보안 강화 완료)
   socket.on('send_chat', (msg) => {
     const room = rooms[socket.roomCode];
     if (room && room.players[socket.id]) {
       const pName = room.players[socket.id].name;
-      io.to(socket.roomCode).emit('chat_message', { type: 'chat', name: pName, msg: msg });
+      
+      // [서버 2중 보안] 해킹용 특수 기호를 안전한 문자로 강제 변환합니다.
+      const safeMsg = typeof msg === 'string' ? msg.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
+      
+      io.to(socket.roomCode).emit('chat_message', { type: 'chat', name: pName, msg: safeMsg });
     }
   });
 
@@ -417,10 +463,16 @@ io.on('connection', (socket) => {
     const room = rooms[socket.roomCode];
     if (room && room.players[socket.id]) {
       if (room.status === 'playing' && room.stage < 5) {
-        room.players[socket.id].pendingRebuy = (room.players[socket.id].pendingRebuy || 0) + 1;
+        // 예약이 안 되어 있고(0이거나 undefined), 칩이 10000 미만일 때만 1번 예약되도록 변경
+        if (!room.players[socket.id].pendingRebuy && room.players[socket.id].chips < 10000) {
+            room.players[socket.id].pendingRebuy = 1;
+        }
       } else {
-        room.players[socket.id].chips += 10000; 
-        room.players[socket.id].rebuyCount += 1;
+        // [새로 추가된 방어막] 칩이 10,000 미만일 때만 리바이(10,000칩 추가)를 허용합니다.
+        if (room.players[socket.id].chips < 10000) {
+          room.players[socket.id].chips += 10000; 
+          room.players[socket.id].rebuyCount += 1;
+        }
       }
       io.to(socket.roomCode).emit('update_game_state', getGameState(room));
       io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `💸 ${room.players[socket.id].name} 님이 리바이를 요청했습니다.` });
@@ -442,7 +494,8 @@ io.on('connection', (socket) => {
           p.rebuyCount += p.pendingRebuy;
           p.pendingRebuy = 0;
         }
-        if (p.isBot && p.chips === 0) { p.chips = 10000; p.rebuyCount++; }
+        // [봇 디테일 개선] 봇 칩이 기본 참가비(200) 미만으로 떨어지면 리바이시킵니다.
+        if (p.isBot && p.chips < 200) { p.chips = 10000; p.rebuyCount++; }
       });
 
       const currBlinds = BLIND_STRUCTURE[room.blindLevel] || BLIND_STRUCTURE[BLIND_STRUCTURE.length - 1];
@@ -456,10 +509,17 @@ io.on('connection', (socket) => {
       room.stage = 0; room.communityCards = []; room.uncontestedWinner = null;
 
       let dIdx = 0;
-      if (isNextHand && room.dealerId) {
+      if (!isNextHand) {
+        // [자리 배치 버그 수정] 첫 게임 시작 시 방의 전체 좌석표를 완전히 랜덤하게 섞고 고정합니다.
+        room.playerOrder.sort(() => Math.random() - 0.5);
+        
+        // 섞인 진짜 좌석표를 기준으로 참가자 명단을 다시 뽑습니다.
+        activeIds.length = 0;
+        activeIds.push(...room.playerOrder.filter(id => room.players[id].chips > 0 && !room.players[id].isOffline));
+      } else if (isNextHand && room.dealerId) {
         let prevDIdx = activeIds.indexOf(room.dealerId);
         dIdx = prevDIdx !== -1 ? (prevDIdx + 1) % activeIds.length : 0;
-      } else if (!isNextHand) { activeIds.sort(() => Math.random() - 0.5); }
+      }
       room.dealerId = activeIds[dIdx];
 
       let sbIdx = (dIdx + 1) % activeIds.length; let bbIdx = (dIdx + 2) % activeIds.length; let utgIdx = (dIdx + 3) % activeIds.length;
@@ -503,6 +563,9 @@ io.on('connection', (socket) => {
   socket.on('player_action', (data) => {
     try {
       const room = rooms[socket.roomCode];
+      // 방이 삭제되었거나 내 정보가 없으면 아무 액션도 하지 않고 종료(에러 방지)
+      if (!room || !room.players[socket.id]) return;
+      
       handleAction(room, socket.roomCode, room.players[socket.id], data, io);
     } catch (e) { console.error("서버 턴 처리 중 오류 방어:", e); }
   });
@@ -567,17 +630,10 @@ io.on('connection', (socket) => {
         delete rooms[roomCode]; 
       } else {
         if (wasHost) { player.isHost = false; room.players[onlineHumans[0]].isHost = true; }
+        
+        // [핵심 수정] 턴인 사람이 나갔을 때 복잡하게 턴을 넘기지 않고, '자동 폴드' 처리하여 메인 시스템(handleAction)에 넘깁니다.
         if (room.status === 'playing' && isMyTurn) {
-          const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline);
-          if (activePlayers.length === 1) {
-             const winner = room.players[activePlayers[0]];
-             winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id; room.currentTurnId = null;
-             io.to(roomCode).emit('system_message', `🎉 [${player.name}] 님의 탈주로 인해\n[${winner.name}]님이 ${room.pot}칩을 획득합니다.`);
-             io.to(roomCode).emit('update_game_state', getGameState(room));
-          } else {
-             findNextTurn(room, activePlayers, false, roomCode, io);
-             io.to(roomCode).emit('update_game_state', getGameState(room));
-          }
+          handleAction(room, roomCode, player, { action: 'fold' }, io);
         } else {
           if (room.status === 'lobby') io.to(roomCode).emit('update_lobby', Object.values(room.players));
           else io.to(roomCode).emit('update_game_state', getGameState(room));
