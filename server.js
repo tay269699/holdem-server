@@ -91,7 +91,7 @@ function distributePots(room) {
   pots.forEach((pot, index) => {
     if (pot.eligible.length === 1) {
       let winner = pot.eligible[0]; winner.chips += pot.amount;
-      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount}칩): ${winner.name} (단독 획득)` : `총 팟(${pot.amount}칩): ${winner.name} (단독 획득)`);
+      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount}칩): ${winner.name}` : `총 팟(${pot.amount}칩): ${winner.name}`);
     } else if (pot.eligible.length > 1) {
       let results = pot.eligible.map(p => {
         let evalResult = evaluateHand(p.cards, room.communityCards);
@@ -101,7 +101,7 @@ function distributePots(room) {
       let highestScore = results[0].score; let winners = results.filter(r => r.score === highestScore);
       let splitAmount = Math.floor(pot.amount / winners.length);
       winners.forEach(w => { w.pRef.chips += splitAmount; });
-      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount}칩): ${winners.map(w=>w.pRef.name).join(", ")} 승리 (${winners[0].handName})` : `총 팟(${pot.amount}칩): ${winners.map(w=>w.pRef.name).join(", ")} 승리 (${winners[0].handName})`);
+      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})` : `총 팟(${pot.amount}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})`);
     }
   });
   return msgs;
@@ -129,6 +129,7 @@ function processAllInShowdown(io, roomCode) {
     if (room.stage === 1) { room.communityCards.push(room.deck.pop(), room.deck.pop(), room.deck.pop()); } 
     else if (room.stage === 2 || room.stage === 3) { room.communityCards.push(room.deck.pop()); }
     io.to(roomCode).emit('update_game_state', getGameState(room));
+    io.to(roomCode).emit('play_sound', 'deal'); // 사운드 트리거
     setTimeout(() => processAllInShowdown(io, roomCode), 1500);
   } else { processShowdown(io, roomCode); }
 }
@@ -136,25 +137,29 @@ function processAllInShowdown(io, roomCode) {
 function handleAction(room, roomCode, player, data, io) {
   if(!room || room.status !== 'playing' || room.currentTurnId !== player.id) return; 
   player.acted = true; 
+  let actionLog = '';
 
   if (data.action === 'call') {
     let callAmount = room.highestBet - player.currentBet;
     if(callAmount > 0) {
       if(callAmount > player.chips) callAmount = player.chips; 
       player.chips -= callAmount; player.currentBet += callAmount; player.invested += callAmount; room.pot += callAmount;
+      actionLog = `[${player.name}] 님이 콜을 받았습니다. (${callAmount}칩)`;
+      io.to(roomCode).emit('play_sound', 'bet');
+    } else {
+      actionLog = `[${player.name}] 님이 체크했습니다.`;
+      io.to(roomCode).emit('play_sound', 'check');
     }
   } else if (data.action === 'fold') { 
     player.state = 'folded'; 
+    actionLog = `❌ [${player.name}] 님이 폴드했습니다.`;
+    io.to(roomCode).emit('play_sound', 'fold');
   } else if (data.action === 'raise') {
-    // [수정 적용 완료] 숏 올인 / 최소 베팅액 룰 버그 픽스
     let raiseAmount = parseInt(data.amount);
     let maxPossibleBet = player.currentBet + player.chips;
     
     if (isNaN(raiseAmount)) raiseAmount = room.minRaise;
-    
-    if (raiseAmount < room.minRaise && raiseAmount !== maxPossibleBet) {
-      raiseAmount = room.minRaise;
-    }
+    if (raiseAmount < room.minRaise && raiseAmount !== maxPossibleBet) { raiseAmount = room.minRaise; }
 
     let cost = raiseAmount - player.currentBet;
     if(cost >= player.chips) { 
@@ -162,20 +167,18 @@ function handleAction(room, roomCode, player, data, io) {
       raiseAmount = player.currentBet + cost; 
     }
     
-    player.chips -= cost; 
-    player.currentBet += cost; 
-    player.invested += cost; 
-    room.pot += cost; 
+    player.chips -= cost; player.currentBet += cost; player.invested += cost; room.pot += cost; 
     
+    let isAllIn = player.chips === 0;
+    actionLog = isAllIn ? `🔥 [${player.name}] 님이 올인했습니다! (${cost}칩)` : `📈 [${player.name}] 님이 레이즈했습니다. (총 ${raiseAmount}칩)`;
+    io.to(roomCode).emit('play_sound', 'raise');
+
     if (raiseAmount > room.highestBet) {
       let raiseDiff = raiseAmount - room.highestBet;
       room.highestBet = raiseAmount; 
-      
-      // Full Raise (기존 레이즈 차액 이상)인 경우에만 다른 사람의 액션을 다시 오픈
       if (raiseDiff >= room.lastRaiseAmount) {
         room.lastRaiseAmount = raiseDiff;
         room.minRaise = room.highestBet + room.lastRaiseAmount;
-        
         room.playerOrder.forEach(id => { 
           let p = room.players[id]; 
           if(p.id !== player.id && p.state === 'playing' && p.chips > 0) p.acted = false; 
@@ -183,6 +186,9 @@ function handleAction(room, roomCode, player, data, io) {
       }
     }
   }
+
+  // 액션 로그 전송
+  if (actionLog) io.to(roomCode).emit('chat_message', { type: 'log', msg: actionLog });
 
   const activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline);
   if (activePlayers.length === 1) {
@@ -198,7 +204,9 @@ function handleAction(room, roomCode, player, data, io) {
   if (isRoundOver) {
     const playersWithChips = activePlayers.filter(id => room.players[id].chips > 0);
     if (playersWithChips.length <= 1 && room.stage < 4) {
-        room.currentTurnId = null; processAllInShowdown(io, roomCode); return;
+        room.currentTurnId = null; 
+        io.to(roomCode).emit('chat_message', { type: 'log', msg: '🔥 전원 올인! 남은 카드를 한 번에 오픈합니다.' });
+        processAllInShowdown(io, roomCode); return;
     }
     if (room.stage < 4) {
       room.stage++; room.highestBet = 0; 
@@ -208,6 +216,7 @@ function handleAction(room, roomCode, player, data, io) {
       if (room.stage === 1) { room.communityCards.push(room.deck.pop(), room.deck.pop(), room.deck.pop()); } 
       else if (room.stage === 2 || room.stage === 3) { room.communityCards.push(room.deck.pop()); } 
       else if (room.stage === 4) { processShowdown(io, roomCode); return; }
+      io.to(roomCode).emit('play_sound', 'deal');
       findNextTurn(room, activePlayers, true, roomCode, io);
     }
   } else { findNextTurn(room, activePlayers, false, roomCode, io); }
@@ -235,7 +244,11 @@ function processBotDecision(room, roomCode, bot, io) {
     }
   }
 
-  if (action === 'raise' && raiseAmt >= bot.chips) { action = 'call'; }
+  // [버그 수정 적용 완료] 봇이 레이즈 금액이 칩보다 클 때 올인하도록 수정
+  if (action === 'raise' && raiseAmt >= bot.chips) { 
+    raiseAmt = bot.chips; 
+  }
+  
   handleAction(room, roomCode, bot, { action, amount: raiseAmt }, io);
 }
 
@@ -256,7 +269,6 @@ function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
     turnIdx = (turnIdx + 1) % activePlayers.length;
     let nextP = room.players[activePlayers[turnIdx]];
     
-    // 이미 베팅을 맞추고 콜(대기) 상태인 사람에게는 턴을 주지 않음
     if (nextP.state === 'playing' && nextP.chips > 0 && !nextP.isOffline) {
       if (!nextP.acted || nextP.currentBet < room.highestBet) {
         room.currentTurnId = nextP.id; nextFound = true; break;
@@ -271,7 +283,9 @@ function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
         let bot = room.players[room.currentTurnId];
         if (bot && bot.isBot) processBotDecision(room, roomCode, bot, io);
       }
-    }, 1500);
+    }, 1500 + Math.random() * 1000); // 봇 턴에 약간의 딜레이를 주어 자연스럽게 연출
+  } else if (room.currentTurnId) {
+    io.to(room.currentTurnId).emit('play_sound', 'my_turn');
   }
 }
 
@@ -325,6 +339,8 @@ io.on('connection', (socket) => {
         if (room.status === 'playing') {
           socket.emit('game_started', getGameState(room)); io.to(roomCode).emit('update_game_state', getGameState(room));
         } else { io.to(roomCode).emit('update_lobby', Object.values(room.players)); }
+        
+        io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🚪 ${playerName} 님이 재접속했습니다.` });
         return; 
       } else { return socket.emit('join_error', '⚠️ 이미 접속 중인 닉네임입니다. 다른 닉네임을 사용해주세요.'); }
     }
@@ -339,6 +355,8 @@ io.on('connection', (socket) => {
     if (room.status === 'playing') {
       socket.emit('game_started', getGameState(room)); io.to(roomCode).emit('update_game_state', getGameState(room));
     } else { io.to(roomCode).emit('update_lobby', Object.values(room.players)); }
+    
+    io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🚪 ${playerName} 님이 입장했습니다.` });
   });
 
   socket.on('add_bot', () => {
@@ -359,10 +377,42 @@ io.on('connection', (socket) => {
     }
   });
 
+  // [신규] 방장 강퇴 기능
+  socket.on('kick_player', (targetId) => {
+    const room = rooms[socket.roomCode];
+    if (room && room.players[socket.id] && room.players[socket.id].isHost) {
+      const target = room.players[targetId];
+      if (target) {
+        io.to(targetId).emit('kicked_out');
+        io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `⛔ 방장이 ${target.name} 님을 강퇴했습니다.` });
+        
+        if (room.status === 'lobby') {
+          delete room.players[targetId];
+          room.playerOrder = room.playerOrder.filter(id => id !== targetId);
+          io.to(socket.roomCode).emit('update_lobby', Object.values(room.players));
+        } else {
+          // 게임 중 강퇴는 오프라인(자동 폴드) 처리하여 로직 꼬임 방지
+          target.isOffline = true;
+          if (target.state === 'playing') {
+            handleAction(room, socket.roomCode, target, { action: 'fold' }, io);
+          }
+        }
+      }
+    }
+  });
+
+  // [신규] 채팅 메시지 수신 및 브로드캐스트
+  socket.on('send_chat', (msg) => {
+    const room = rooms[socket.roomCode];
+    if (room && room.players[socket.id]) {
+      const pName = room.players[socket.id].name;
+      io.to(socket.roomCode).emit('chat_message', { type: 'chat', name: pName, msg: msg });
+    }
+  });
+
   socket.on('rebuy', () => {
     const room = rooms[socket.roomCode];
     if (room && room.players[socket.id]) {
-      // [수정 적용 완료] 게임 진행 중일 경우 바로 지급하지 않고 예약(pending) 처리
       if (room.status === 'playing' && room.stage < 5) {
         room.players[socket.id].pendingRebuy = (room.players[socket.id].pendingRebuy || 0) + 1;
       } else {
@@ -370,6 +420,7 @@ io.on('connection', (socket) => {
         room.players[socket.id].rebuyCount += 1;
       }
       io.to(socket.roomCode).emit('update_game_state', getGameState(room));
+      io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `💸 ${room.players[socket.id].name} 님이 리바이를 요청했습니다.` });
     }
   });
 
@@ -382,7 +433,6 @@ io.on('connection', (socket) => {
         room.blindLevel = Math.min(room.blindLevel + 1, BLIND_STRUCTURE.length - 1); room.blindEndTime = Date.now() + BLIND_DURATION;
       }
 
-      // [수정 적용 완료] 새 판이 시작될 때 예약된 리바이 칩들을 일괄 지급
       Object.values(room.players).forEach(p => {
         if (p.pendingRebuy) {
           p.chips += (10000 * p.pendingRebuy);
@@ -436,9 +486,13 @@ io.on('connection', (socket) => {
       });
 
       io.to(socket.roomCode).emit('game_started', getGameState(room));
+      io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `📢 새로운 판이 시작되었습니다!` });
+      io.to(socket.roomCode).emit('play_sound', 'deal');
       
       if (room.currentTurnId && room.players[room.currentTurnId].isBot) {
         setTimeout(() => { processBotDecision(room, socket.roomCode, room.players[room.currentTurnId], io); }, 1500);
+      } else if (room.currentTurnId) {
+        io.to(room.currentTurnId).emit('play_sound', 'my_turn');
       }
     }
   });
@@ -476,6 +530,7 @@ io.on('connection', (socket) => {
         finalMsg += `${medals[idx] || '🔹'} [${r.name}]\n  💰 칩: ${r.chips.toLocaleString()} | 💸 리바이: ${r.rebuys}회\n  📈 순수익: ${profitStr}\n\n`;
       });
       io.to(socket.roomCode).emit('system_message', finalMsg);
+      io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `🛑 게임이 종료되어 로비로 돌아갑니다.` });
       
       room.status = 'lobby'; room.blindLevel = 0; room.blindEndTime = null;
       
@@ -500,6 +555,7 @@ io.on('connection', (socket) => {
       const wasHost = player.isHost; const isMyTurn = (room.currentTurnId === socket.id);
       
       player.isOffline = true;
+      io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🔌 ${player.name} 님의 연결이 끊겼습니다.` });
       if (room.status === 'playing' && player.state === 'playing') player.state = 'folded';
 
       const onlineHumans = room.playerOrder.filter(id => !room.players[id].isOffline && !room.players[id].isBot);
@@ -529,4 +585,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, '0.0.0.0', () => { console.log(`🚀 게임 로직/올인 픽스 완료! (포트: ${PORT})`); });
+http.listen(PORT, '0.0.0.0', () => { console.log(`🚀 채팅, 사운드, 강퇴 기능 추가 완료! (포트: ${PORT})`); });
