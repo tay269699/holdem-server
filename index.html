@@ -506,7 +506,8 @@
         const opacity = p.isOffline ? '0.3' : (p.state === 'busted' || p.state === 'waiting') ? '0.5' : '1';
 
         let timerBar = '';
-        if (isTurn && !p.isBot && gameData.turnStartTime) {
+        // 🚨 게임이 진행 중(stage 5가 아님)이고 내 턴일 때만 타이머를 보여줍니다!
+        if (isTurn && !p.isBot && gameData.turnStartTime && gameData.stage !== 5) {
            const remainSec = Math.max(0, (20000 - (Date.now() - gameData.turnStartTime)) / 1000);
            timerBar = `<div style="width: 100%; background: #444; height: 5px; border-radius: 3px; margin-top: 8px; overflow: hidden;">
              <div style="width: 100%; height: 100%; animation: shrinkBar ${remainSec}s linear forwards;"></div>
