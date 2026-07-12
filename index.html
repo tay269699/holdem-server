@@ -451,24 +451,37 @@
       if (parseInt(raiseInput.value) < currentMinRaise) raiseInput.value = currentMinRaise; 
 
       const container = document.getElementById('my-cards');
-      container.innerHTML = ''; 
-      
       if (myInfo && myInfo.handName) document.getElementById('my-hand-guide').innerText = `(${myInfo.handName})`;
       else document.getElementById('my-hand-guide').innerText = '';
 
-      if (myInfo && myInfo.cards) { 
-        myInfo.cards.forEach(c => {
-          const colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red-card' : '';
-          container.innerHTML += `<div class="card ${colorClass}">${c.suit}${c.rank}</div>`;
-        });
+      // [수정됨] 내 카드 애니메이션 중복 방지 (기존 카드는 두고, 새 카드만 옆에 끼워 넣기)
+      if (!myInfo || !myInfo.cards || myInfo.cards.length === 0) {
+        container.innerHTML = ''; 
+      } else {
+        if (container.children.length > myInfo.cards.length) container.innerHTML = ''; // 꼬임 방지용 초기화
+        let startIndex = container.children.length; // 현재 화면에 있는 카드 개수 확인
+        for (let i = startIndex; i < myInfo.cards.length; i++) {
+          let c = myInfo.cards[i];
+          let colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red-card' : '';
+          // innerHTML 덮어쓰기 대신, insertAdjacentHTML을 써서 새 요소만 추가합니다.
+          container.insertAdjacentHTML('beforeend', `<div class="card ${colorClass}">${c.suit}${c.rank}</div>`);
+        }
       }
 
       const commContainer = document.getElementById('community-cards');
-      commContainer.innerHTML = '';
-      gameData.communityCards.forEach(c => {
-        const colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red-card' : '';
-        commContainer.innerHTML += `<div class="card ${colorClass}">${c.suit}${c.rank}</div>`;
-      });
+      
+      // [수정됨] 바닥 카드 애니메이션 중복 방지
+      if (!gameData.communityCards || gameData.communityCards.length === 0) {
+        commContainer.innerHTML = '';
+      } else {
+        if (commContainer.children.length > gameData.communityCards.length) commContainer.innerHTML = '';
+        let startIndex = commContainer.children.length;
+        for (let i = startIndex; i < gameData.communityCards.length; i++) {
+          let c = gameData.communityCards[i];
+          let colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red-card' : '';
+          commContainer.insertAdjacentHTML('beforeend', `<div class="card ${colorClass}">${c.suit}${c.rank}</div>`);
+        }
+      }
 
       const board = document.getElementById('player-status-board');
       board.innerHTML = '';
