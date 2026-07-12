@@ -186,12 +186,13 @@
     
     // [완벽한 사운드 겹침 처리를 위한 오디오 풀(Pool) 구현]
     const soundUrls = {
-      deal: 'https://actions.google.com/sounds/v1/water/air_release.ogg',
-      bet: 'https://actions.google.com/sounds/v1/foley/glass_clink.ogg',
-      raise: 'https://actions.google.com/sounds/v1/foley/glass_clink.ogg',
-      check: 'https://actions.google.com/sounds/v1/foley/foley_wood_tap.ogg',
-      fold: 'https://actions.google.com/sounds/v1/paper/paper_flap.ogg',
-      my_turn: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg'
+      deal: '/deal.mp3',
+      bet: '/bet.mp3',
+      raise: '/bet.mp3', // 레이즈도 베팅과 동일한 칩 소리 사용
+      check: '/check.mp3',
+      fold: '/fold.mp3',
+      my_turn: '/my_turn.mp3',
+      result: '/result.mp3' // 👈 새로 추가됨!
     };
 
     const soundPool = {};
@@ -241,35 +242,33 @@
     function showCustomAlert(msg) {
       document.getElementById('custom-modal-text').innerText = msg;
       document.getElementById('custom-modal-overlay').style.display = 'flex';
+      playSound('result'); // 👈 결과음 재생 명령 추가!
     }
     function closeModal() { document.getElementById('custom-modal-overlay').style.display = 'none'; }
 
     // 브라우저 오디오 권한 강제 해제 (Audio Unlock)
-document.body.addEventListener('click', () => {
-  window.userInteracted = true;
-  
-  // soundPool에 미리 만들어둔 4개의 채널 x 6가지 소리 = 총 24개의 오디오 객체를
-  // 찰나의 순간에 전부 재생했다가 정지시켜서 브라우저로부터 재생 권한을 획득합니다.
-  for (let key in soundPool) {
-    soundPool[key].forEach(audio => {
-      // 볼륨을 0으로 잠시 낮춰서 재생 시 튀는 소리를 방지
-      const originalVolume = audio.volume;
-      audio.volume = 0; 
+    document.body.addEventListener('click', () => {
+      window.userInteracted = true;
       
-      let playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.then(() => {
-          audio.pause();
-          audio.currentTime = 0;
-          audio.volume = originalVolume; // 원래 볼륨으로 복구
-        }).catch(err => {
-          console.warn(`오디오 잠금 해제 실패 (${key}):`, err);
+      for (let key in soundPool) {
+        soundPool[key].forEach(audio => {
+          const originalVolume = audio.volume;
+          audio.volume = 0; // 권한 획득 시 튀는 소리 방지
+          
+          let playPromise = audio.play();
+          if (playPromise !== undefined) {
+            playPromise.then(() => {
+              audio.pause();
+              audio.currentTime = 0;
+              audio.volume = originalVolume; // 볼륨 복구
+            }).catch(err => {
+              console.warn(`오디오 잠금 해제 대기 중 (${key})`);
+            });
+          }
         });
       }
-    });
-  }
-  console.log("🔊 오디오 권한 잠금 해제 완료!");
-}, { once: true });
+      console.log("🔊 오디오 권한 잠금 해제 완료!");
+    }, { once: true });
 
     function joinRoom() {
       const roomCode = document.getElementById('room-code').value;

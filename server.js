@@ -4,6 +4,9 @@ const app = express();
 const path = require('path');
 const http = require('http').createServer(app);
 
+// 👇 이 줄을 새로 추가합니다.
+app.use(express.static(path.join(__dirname, 'public')));
+
 const io = require('socket.io')(http, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
