@@ -314,72 +314,80 @@ function processBotDecision(room, roomCode, bot, io) {
   let rand = Math.random(); // 0~1 사이의 난수 (봇의 변덕)
 
   if (room.stage === 0) {
-    // [1] 프리플랍 (시작 카드 2장만 있는 상태)
+    // [1] 프리플랍 (시작 카드 2장)
     let v1 = rankValues[bot.cards[0].rank];
     let v2 = rankValues[bot.cards[1].rank];
     let maxV = Math.max(v1, v2);
     let minV = Math.min(v1, v2);
 
-    // 🚨 누군가 큰 금액(내 남은 칩의 40% 이상)을 베팅하거나 올인했을 때
-    if (callAmount >= bot.chips * 0.4) {
-      // 1. 최상위 프리미엄 카드 (AA, KK, QQ, JJ, AK, AQ)
-      if ((v1 === v2 && v1 >= 11) || (maxV >= 13 && minV >= 11)) {
-        // 90% 확률로 덤비지만, 10% 확률로 좋은 패를 꺾고 도망감
-        action = rand < 0.90 ? 'call' : 'fold'; 
-      } 
-      // 2. 그럭저럭 괜찮은 카드 (하위 원페어 또는 10 이상 1장 포함)
-      else if (v1 === v2 || maxV >= 10) {
-        // 원래는 죽어야 하지만, 20% 확률로 콜을 외침
-        action = rand < 0.20 ? 'call' : 'fold';
-      } 
-      // 3. 완전 똥패
-      else {
-        // 95% 확률로 얌전히 폴드하지만, 5% 확률로 무지성 콜
-        action = rand < 0.05 ? 'call' : 'fold'; 
+    // 프리미엄 카드 판별 (10페어 이상, 또는 AK, AQ, AJ, KQ)
+    let isPremium = (v1 === v2 && v1 >= 10) || (maxV >= 13 && minV >= 11); 
+
+    if (callAmount > 0) {
+      // ⚔️ 누군가 먼저 레이즈를 쳤을 때 (방어 및 역공)
+      if (isPremium) {
+        action = rand < 0.6 ? 'raise' : 'call'; // 60% 확률로 묵직한 맞불(리레이즈) 놓기
+        raiseAmt = room.highestBet + room.minRaise * 2;
+      } else if (v1 === v2 || maxV >= 10) {
+        action = 'call';
+        // 상대 베팅이 내 남은 칩의 40% 이상으로 너무 쎄면 80% 확률로 쫄아서 다이
+        if (callAmount >= bot.chips * 0.4 && rand < 0.8) action = 'fold';
+      } else {
+        action = rand < 0.05 ? 'raise' : 'fold'; // 5% 미친 뻥카 맞불, 95% 폴드
+        raiseAmt = room.highestBet + room.minRaise;
       }
-    } 
-    // 🔹 평화로운 상황 (베팅 금액이 작을 때)
-      else {
-        if (v1 === v2 && v1 >= 10) { 
-          action = 'raise'; raiseAmt = room.minRaise * 2; // 좋은 페어면 크게 레이즈
-        } else if (v1 === v2 || maxV >= 10) { 
-          action = 'call'; 
-          if (callAmount === 0 && rand < 0.2) { action = 'raise'; raiseAmt = room.minRaise; } // 20% 확률 블러핑
-        } else {
-          // 👇 해결된 부분: 돈을 내야 한다면 90% 확률로 얌전히 죽음
-          if (callAmount === 0) { action = 'call'; } // 이미 돈을 냈거나 공짜면 체크로 묻어감
-          else if (rand < 0.1) { action = 'call'; } // 10% 확률로 멍청하게 콜 (약간의 변수 창출)
-          else { action = 'fold'; } // 나머지 90%는 정상적으로 폴드(포기)함
-        }
+    } else {
+      // 🕊️ 아무도 베팅 안 했을 때 (선공)
+      if (isPremium) {
+        action = 'raise';
+        raiseAmt = room.minRaise * (rand < 0.5 ? 2 : 3); // 2~3배의 강한 선제 공격
+      } else if (v1 === v2 || maxV >= 10) {
+        action = rand < 0.4 ? 'raise' : 'call'; // 40% 확률로 오픈 레이즈
+        raiseAmt = room.minRaise;
+      } else {
+        action = rand < 0.1 ? 'raise' : 'call'; // 10% 가벼운 뻥카 레이즈, 나머진 묻어가기
+        raiseAmt = room.minRaise;
       }
+    }
   } else { 
     // [2] 플랍 이후 (바닥 카드가 깔린 상태)
     let evalResult = evaluateHand(bot.cards, room.communityCards);
 
-    if (evalResult.level >= 3) { // 트리플 이상 (매우 강력함)
+    if (evalResult.level >= 3) { // 트리플 이상 (괴물 패)
       action = 'raise';
-      raiseAmt = rand < 0.5 ? room.minRaise * 2 : room.minRaise * 3;
+      // 이미 앞사람이 돈을 냈다면 더 크게 올리고, 아니면 최소 레이즈의 2~4배 발사
+      raiseAmt = callAmount > 0 ? room.highestBet + room.minRaise * 2 : room.minRaise * (2 + Math.floor(rand * 3));
     } 
     else if (evalResult.level >= 1) { // 원페어/투페어
       if (callAmount === 0) {
-        action = rand < 0.4 ? 'raise' : 'call'; // 40% 확률로 블러핑 레이즈
+        action = rand < 0.6 ? 'raise' : 'call'; // 60% 확률로 주도적 베팅
         raiseAmt = room.minRaise;
-      } else if (callAmount <= bot.chips * 0.5) { // 내 남은 칩의 50% 이하 베팅이면 따라감
-        action = 'call';
+      } else {
+        // 누군가 치고 나왔을 때
+        if (callAmount <= bot.chips * 0.5) action = rand < 0.2 ? 'raise' : 'call'; // 20% 역공, 80% 콜
+        else action = rand < 0.7 ? 'fold' : 'call'; // 너무 비싸면 70% 포기
       }
     } 
-    else { // 족보가 없을 때(하이카드)
+    else { // 하이카드 (안 맞음)
       if (callAmount === 0) {
-         action = rand < 0.2 ? 'raise' : 'call'; // 20% 확률로 약한 뻥카
+         action = rand < 0.2 ? 'raise' : 'call'; // 20% 확률 뻥카
          raiseAmt = room.minRaise;
+      } else {
+         action = rand < 0.1 ? 'raise' : 'fold'; // 10% 미친 뻥카, 90% 폴드
+         raiseAmt = room.highestBet + room.minRaise;
       }
     }
   }
 
-  // [공통 보정] 올인 규칙 및 눈치(체크) 적용
+  // [공통 보정 1] 올인 규칙 및 눈치(체크) 적용
   if (action === 'raise' && raiseAmt >= bot.chips) { raiseAmt = bot.chips + bot.currentBet; }
-  // 폴드할 상황인데 앞에 낸 돈이 없으면 굳이 안 죽고 체크(콜)로 묻어감
   if (action === 'fold' && callAmount === 0) { action = 'call'; } 
+
+  // 👇 🌟 [버그 픽스 핵심] 봇 멈춤(데드락) 방지 코드
+  // 숏 올인을 맞아서 이미 한 번 행동(acted)을 마친 봇은 서버 룰상 '레이즈'가 불가능하므로 강제로 '콜'로 바꿉니다.
+  if (action === 'raise' && bot.acted) { 
+    action = 'call'; 
+  }
 
   handleAction(room, roomCode, bot, { action, amount: raiseAmt }, io);
 }
