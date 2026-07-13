@@ -593,9 +593,9 @@
         for (let i = startIndex; i < gameData.communityCards.length; i++) {
           let c = gameData.communityCards[i];
           let colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red-card' : '';
-          // 👇 여기도 마찬가지로 data-card 이름표를 달아줍니다!
-          comm// 👇 <br>${c.suit} 부분을 지워서 숫자/알파벳만 깔끔하게 남깁니다! (내 카드, 바닥 카드 두 곳 모두 수정)
-          container.insertAdjacentHTML('beforeend', 
+          
+          // 👇 이제 정상적인 commContainer에 예쁜 카드를 깔아줍니다!
+          commContainer.insertAdjacentHTML('beforeend', 
             `<div class="card ${colorClass}" data-card="${c.suit}${c.rank}">
               <div class="card-top">${c.rank}</div>
               <div class="card-mid">${c.suit}</div>
