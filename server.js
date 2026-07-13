@@ -309,16 +309,37 @@ function processBotDecision(room, roomCode, bot, io) {
     let v1 = rankValues[bot.cards[0].rank];
     let v2 = rankValues[bot.cards[1].rank];
     let maxV = Math.max(v1, v2);
+    let minV = Math.min(v1, v2);
 
-    if (v1 === v2 && v1 >= 10) { 
-      action = 'raise'; raiseAmt = room.minRaise * 2; // QQ, KK, AA면 크게 레이즈
-    } else if (v1 === v2 || maxV >= 10) { 
-      action = 'call'; 
-      if (callAmount === 0 && rand < 0.2) { action = 'raise'; raiseAmt = room.minRaise; } // 20% 확률로 삥(블러핑)
-    } else {
-      // 안 좋은 카드일 때
-      if (callAmount === 0 || callAmount <= room.minRaise) { action = 'call'; } // 공짜거나 싸면 일단 봄
-      else if (rand < 0.1) { action = 'call'; } // 10% 확률로 무지성 콜
+    // 🚨 누군가 큰 금액(내 남은 칩의 40% 이상)을 베팅하거나 올인했을 때
+    if (callAmount >= bot.chips * 0.4) {
+      // 1. 최상위 프리미엄 카드 (AA, KK, QQ, JJ, AK, AQ)
+      if ((v1 === v2 && v1 >= 11) || (maxV >= 13 && minV >= 11)) {
+        // 90% 확률로 덤비지만, 10% 확률로 좋은 패를 꺾고 도망감
+        action = rand < 0.90 ? 'call' : 'fold'; 
+      } 
+      // 2. 그럭저럭 괜찮은 카드 (하위 원페어 또는 10 이상 1장 포함)
+      else if (v1 === v2 || maxV >= 10) {
+        // 원래는 죽어야 하지만, 20% 확률로 콜을 외침
+        action = rand < 0.20 ? 'call' : 'fold';
+      } 
+      // 3. 완전 똥패
+      else {
+        // 95% 확률로 얌전히 폴드하지만, 5% 확률로 무지성 콜
+        action = rand < 0.05 ? 'call' : 'fold'; 
+      }
+    } 
+    // 🔹 평화로운 상황 (베팅 금액이 작을 때)
+    else {
+      if (v1 === v2 && v1 >= 10) { 
+        action = 'raise'; raiseAmt = room.minRaise * 2; // 좋은 페어면 크게 레이즈
+      } else if (v1 === v2 || maxV >= 10) { 
+        action = 'call'; 
+        if (callAmount === 0 && rand < 0.2) { action = 'raise'; raiseAmt = room.minRaise; } // 20% 확률 블러핑
+      } else {
+        if (callAmount === 0 || callAmount <= room.minRaise) { action = 'call'; } // 공짜면 일단 봄
+        else if (rand < 0.1) { action = 'call'; } // 10% 멍청한 콜 유지
+      }
     }
   } else { 
     // [2] 플랍 이후 (바닥 카드가 깔린 상태)
