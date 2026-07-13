@@ -680,6 +680,10 @@
             btnCall.innerText = `콜 (${actualCall.toLocaleString()})${actualCall===myInfo.chips ? ' 올인!' : ''}`;
             btnCall.style.backgroundColor = "#3498db"; 
           }
+
+          // 👇 [추가된 코드] 이미 액션을 했는데 턴이 다시 왔다면(숏 올인을 맞았다면) 레이즈 박스를 숨김
+          document.querySelector('.raise-box').style.display = myInfo.acted ? 'none' : 'block';
+
           document.getElementById('action-panel').style.display = 'block'; 
         } else {
           document.getElementById('game-info').innerText = turnPlayerName ? `👉 [${turnPlayerName}] 님의 턴...` : '결과 판정 중...';

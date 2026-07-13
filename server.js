@@ -181,8 +181,8 @@ function processAllInShowdown(io, roomCode) {
 }
 
 function handleAction(room, roomCode, player, data, io) {
-  // 👇 (수정) 플레이어 객체가 없거나 데이터가 비정상적일 때 서버가 죽는 것을 방지합니다.
-  if(!room || room.status !== 'playing' || !player || room.currentTurnId !== player.id || !data) return; 
+  // 👇 [보안 패치] stage === 5 (결과창) 조건을 추가하여 무한 칩 복사 해킹과 타이머 꼬임을 완벽히 차단합니다.
+  if(!room || room.status !== 'playing' || room.stage === 5 || !player || room.currentTurnId !== player.id || !data) return; 
   
   // 유저가 버튼을 눌러 액션을 취하면 째깍거리던 타이머를 즉시 정지시킵니다
   if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
@@ -206,6 +206,12 @@ function handleAction(room, roomCode, player, data, io) {
     actionLog = `❌ [${player.name}] 님이 폴드했습니다.`;
     io.to(roomCode).emit('play_sound', 'fold');
   } else if (data.action === 'raise') {
+
+    // 👇 [추가된 코드] 이미 행동(acted)을 마친 유저가 레이즈를 시도하면 숏 올인 룰 위반이므로 서버가 무시함
+    if (player.acted) {
+      return; 
+    }
+
     let raiseAmount = parseInt(data.amount);
     let maxPossibleBet = player.currentBet + player.chips;
     
