@@ -551,10 +551,21 @@ io.on('connection', (socket) => {
         '코알라', '독수리', '펠리컨', '두꺼비', '카멜레온'
       ];
 
-      // 리스트에서 각각 하나씩 랜덤으로 뽑아서 이름 조합
-      const randomAdj = adjectives[Math.floor(Math.random() * adjectives.length)];
-      const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
-      const botName = `🤖 ${randomAdj} ${randomNoun}`;
+      // 리스트에서 각각 하나씩 랜덤으로 뽑아서 이름 조합 (형용사, 명사 개별 중복 방지 로직)
+      let botName = '';
+      let isDuplicate = true;
+      
+      // 뽑은 형용사나 명사가 이미 존재하는지 확인하고, 겹치면 다시 뽑습니다!
+      while (isDuplicate) {
+        const randomAdj = adjectives[Math.floor(Math.random() * adjectives.length)];
+        const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
+        botName = `🤖 ${randomAdj} ${randomNoun}`;
+        
+        // 현재 방에 있는 사람들의 이름 중에, 방금 뽑은 '형용사'나 '명사'가 단 하나라도 포함되어 있는지 검사합니다.
+        isDuplicate = Object.values(room.players).some(p => {
+          return p.name.includes(randomAdj) || p.name.includes(randomNoun);
+        });
+      }
       
       room.players[botId] = {
         id: botId, name: botName, chips: 10000,
