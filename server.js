@@ -187,6 +187,9 @@ function handleAction(room, roomCode, player, data, io) {
   // 유저가 버튼을 눌러 액션을 취하면 째깍거리던 타이머를 즉시 정지시킵니다
   if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
   
+  // 🌟 [수정 1] 도장을 찍기 전에, 원래 이 사람이 행동을 했었는지 먼저 기억해둡니다!
+  const hasAlreadyActed = player.acted;
+
   player.acted = true; 
   let actionLog = '';
 
@@ -207,8 +210,8 @@ function handleAction(room, roomCode, player, data, io) {
     io.to(roomCode).emit('play_sound', 'fold');
   } else if (data.action === 'raise') {
 
-    // 👇 [추가된 코드] 이미 행동(acted)을 마친 유저가 레이즈를 시도하면 숏 올인 룰 위반이므로 서버가 무시함
-    if (player.acted) {
+    // 🌟 [수정 2] 방금 true로 바뀐 player.acted가 아니라, 아까 기억해둔 hasAlreadyActed를 검사합니다!
+    if (hasAlreadyActed) {
       return; 
     }
 
