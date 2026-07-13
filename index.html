@@ -20,8 +20,8 @@
     /* 👇 font-family: 'Arial', sans-serif; 를 맨 앞에 추가했습니다! */
     .card { font-family: 'Arial', sans-serif; background: white; color: black; border-radius: 6px; font-weight: bold; width: 55px; height: 80px; box-shadow: 2px 2px 6px rgba(0,0,0,0.4); position: relative; animation: dealAnimation 0.4s ease-out; background-image: linear-gradient(to bottom right, #ffffff, #f1f2f6); }
     
-    /* 좌측 상단 마크: 위에서 5px, 왼쪽에서 5px 위치에 강제 고정! */
-    .card-top { position: absolute; top: 5px; left: 5px; font-size: 13px; text-align: center; line-height: 1; letter-spacing: -1px; }
+    /* 👇 font-size를 13px에서 16px로 키우고, 왼쪽 여백(left)을 6px로 미세 조정했습니다! */
+    .card-top { position: absolute; top: 5px; left: 6px; font-size: 16px; text-align: center; line-height: 1; letter-spacing: -1px; }
     
     /* 중앙 마크: 정중앙(50%)에 강제 고정! */
     .card-mid { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 26px; }
@@ -558,25 +558,27 @@
       } else {
         // 👇 새로 추가된 핵심 로직: 서버에서 받은 새 첫 번째 카드와, 내 화면에 떠 있는 첫 번째 카드가 다르면 (즉, 새 판이 시작된 거라면) 기존 카드를 싹 지워줍니다.
         let firstCardStr = myInfo.cards[0].suit + myInfo.cards[0].rank;
-        let currentFirstCardDOM = container.children[0] ? container.children[0].innerText : '';
+        // 👇 innerText 대신 눈에 보이지 않는 data-card 이름표를 읽어옵니다.
+        let currentFirstCardDOM = container.children[0] ? container.children[0].getAttribute('data-card') : '';
         
         if (currentFirstCardDOM !== firstCardStr) {
           container.innerHTML = '';
         }
 
-        if (container.children.length > myInfo.cards.length) container.innerHTML = ''; // 꼬임 방지용 초기화
-        let startIndex = container.children.length; // 현재 화면에 있는 카드 개수 확인
+        if (container.children.length > myInfo.cards.length) container.innerHTML = ''; 
+        let startIndex = container.children.length; 
         for (let i = startIndex; i < myInfo.cards.length; i++) {
           let c = myInfo.cards[i];
           let colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red-card' : '';
-          // 실제 포커 카드 같은 3단 레이아웃으로 출력합니다.
+          // 👇 div 태그 안에 data-card="${c.suit}${c.rank}" 이름표를 달아줍니다!
+          // 👇 <br>${c.suit} 부분을 지워서 숫자/알파벳만 깔끔하게 남깁니다! (내 카드, 바닥 카드 두 곳 모두 수정)
           container.insertAdjacentHTML('beforeend', 
-            `<div class="card ${colorClass}">
-              <div class="card-top">${c.rank}<br>${c.suit}</div>
+            `<div class="card ${colorClass}" data-card="${c.suit}${c.rank}">
+              <div class="card-top">${c.rank}</div>
               <div class="card-mid">${c.suit}</div>
-              
              </div>`
           );
+        
         }
       }
 
@@ -591,11 +593,12 @@
         for (let i = startIndex; i < gameData.communityCards.length; i++) {
           let c = gameData.communityCards[i];
           let colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red-card' : '';
-          commContainer.insertAdjacentHTML('beforeend', 
-            `<div class="card ${colorClass}">
-              <div class="card-top">${c.rank}<br>${c.suit}</div>
+          // 👇 여기도 마찬가지로 data-card 이름표를 달아줍니다!
+          comm// 👇 <br>${c.suit} 부분을 지워서 숫자/알파벳만 깔끔하게 남깁니다! (내 카드, 바닥 카드 두 곳 모두 수정)
+          container.insertAdjacentHTML('beforeend', 
+            `<div class="card ${colorClass}" data-card="${c.suit}${c.rank}">
+              <div class="card-top">${c.rank}</div>
               <div class="card-mid">${c.suit}</div>
-              
              </div>`
           );
         }

@@ -110,8 +110,13 @@ function distributePots(room) {
         w.pRef.chips += splitAmount; 
         if (idx === 0) w.pRef.chips += remainder; 
       });
-      // 👇 공동 승자 하이라이트 적용 (파란색 굵은 글씨)
-      msgs.push(pots.length > 1 ? `💰 사이드 팟 ${index+1} (${pot.amount.toLocaleString()}칩)\n 🤝 <b style="color:#3498db; font-size:18px;">공동 승자: ${winners.map(w=>w.pRef.name).join(", ")}</b> (${winners[0].handName})` : `💰 총 팟 (${pot.amount.toLocaleString()}칩)\n 🤝 <b style="color:#3498db; font-size:18px;">공동 승자: ${winners.map(w=>w.pRef.name).join(", ")}</b> (${winners[0].handName})`);
+      
+      // 👇 승자(winners) 배열의 길이를 확인하여 단독 승자와 공동 승자를 완벽하게 구분합니다!
+      if (winners.length === 1) {
+        msgs.push(pots.length > 1 ? `💰 사이드 팟 ${index+1} (${pot.amount.toLocaleString()}칩)\n 👑 <b style="color:#2ecc71; font-size:18px;">승자: ${winners[0].pRef.name}</b> (${winners[0].handName})` : `💰 총 팟 (${pot.amount.toLocaleString()}칩)\n 👑 <b style="color:#2ecc71; font-size:18px;">승자: ${winners[0].pRef.name}</b> (${winners[0].handName})`);
+      } else {
+        msgs.push(pots.length > 1 ? `💰 사이드 팟 ${index+1} (${pot.amount.toLocaleString()}칩)\n 🤝 <b style="color:#3498db; font-size:18px;">공동 승자: ${winners.map(w=>w.pRef.name).join(", ")}</b> (${winners[0].handName})` : `💰 총 팟 (${pot.amount.toLocaleString()}칩)\n 🤝 <b style="color:#3498db; font-size:18px;">공동 승자: ${winners.map(w=>w.pRef.name).join(", ")}</b> (${winners[0].handName})`);
+      }
     }
   });
   return msgs;
