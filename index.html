@@ -624,7 +624,8 @@
         else if (p.state === 'folded') stateMark = '❌(폴드)';
         else if (p.chips === 0 && p.state === 'playing') stateMark = '🔥(올인)';
         else if (p.state === 'waiting') stateMark = '⏳(대기)';
-        else if (p.state === 'busted') stateMark = '💀(파산)';
+        // 👇 파산 상태일 때, 리바이를 예약(pendingRebuy가 0보다 큼)했다면 상태를 바꿔서 표시합니다!
+        else if (p.state === 'busted') stateMark = p.pendingRebuy > 0 ? '🔄(리바이 대기)' : '💀(파산)';
         else if (p.acted) stateMark = '✔️(완료)';
 
         if(isTurn) turnPlayerName = p.name;
