@@ -181,7 +181,8 @@ function processAllInShowdown(io, roomCode) {
 }
 
 function handleAction(room, roomCode, player, data, io) {
-  if(!room || room.status !== 'playing' || room.currentTurnId !== player.id) return; 
+  // 👇 (수정) 플레이어 객체가 없거나 데이터가 비정상적일 때 서버가 죽는 것을 방지합니다.
+  if(!room || room.status !== 'playing' || !player || room.currentTurnId !== player.id || !data) return; 
   
   // 유저가 버튼을 눌러 액션을 취하면 째깍거리던 타이머를 즉시 정지시킵니다
   if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
@@ -396,17 +397,23 @@ function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
     if (room.turnTimer) clearTimeout(room.turnTimer);
     
     room.turnTimer = setTimeout(() => {
-      if (rooms[roomCode] === room && room.currentTurnId === expectedTurnId) {
-        let p = room.players[expectedTurnId];
-        let callAmount = room.highestBet - p.currentBet;
-        
-        // 시간 초과 시 낼 돈이 없으면 체크, 낼 돈이 있으면 폴드 강제 처리
-        let timeoutAction = callAmount === 0 ? 'call' : 'fold';
-        handleAction(room, roomCode, p, { action: timeoutAction }, io);
-        
-        io.to(roomCode).emit('chat_message', { type: 'sys', msg: `⏰ [${p.name}] 님이 시간 초과로 자동 진행(폴드/체크) 되었습니다.` });
-      }
-    }, 20000); // 20초 (20000ms) 설정
+          if (rooms[roomCode] === room && room.currentTurnId === expectedTurnId) {
+            let p = room.players[expectedTurnId];
+            if (!p) { room.currentTurnId = null; return; } // 🛡️ 유저가 없으면 에러 방지
+            
+            let callAmount = Math.max(0, (room.highestBet || 0) - (p.currentBet || 0)); // 🛡️ 금액 오류(음수) 방지
+            
+            // 시간 초과 시 낼 돈이 없으면 체크, 낼 돈이 있으면 폴드 강제 처리
+            let timeoutAction = callAmount === 0 ? 'call' : 'fold';
+            
+            try {
+              handleAction(room, roomCode, p, { action: timeoutAction }, io);
+              io.to(roomCode).emit('chat_message', { type: 'sys', msg: `⏰ [${p.name}] 님이 시간 초과로 자동 진행(폴드/체크) 되었습니다.` });
+            } catch(e) { 
+              console.error("서버 폭파 방어 성공(1):", e); 
+            }
+          }
+        }, 20000); // 20초 (20000ms) 설정
   }
 }
 
@@ -740,10 +747,17 @@ io.on('connection', (socket) => {
         room.turnTimer = setTimeout(() => {
           if (rooms[socket.roomCode] === room && room.currentTurnId === expectedTurnId) {
             let p = room.players[expectedTurnId];
-            let callAmount = room.highestBet - p.currentBet;
+            if (!p) { room.currentTurnId = null; return; } // 🛡️ 유저가 없으면 에러 방지
+
+            let callAmount = Math.max(0, (room.highestBet || 0) - (p.currentBet || 0)); // 🛡️ 금액 오류(음수) 방지
             let timeoutAction = callAmount === 0 ? 'call' : 'fold';
-            handleAction(room, socket.roomCode, p, { action: timeoutAction }, io);
-            io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `⏰ [${p.name}] 님이 시간 초과로 자동 진행(폴드/체크) 되었습니다.` });
+            
+            try {
+              handleAction(room, socket.roomCode, p, { action: timeoutAction }, io);
+              io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `⏰ [${p.name}] 님이 시간 초과로 자동 진행(폴드/체크) 되었습니다.` });
+            } catch(e) { 
+              console.error("서버 폭파 방어 성공(2):", e); 
+            }
           }
         }, 20000); // 20초 카운트다운
       }

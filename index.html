@@ -125,7 +125,7 @@
 
   <div id="login-screen" style="display: block;">
     <h1>프라이빗 홀덤</h1>
-    <input type="text" id="room-code" placeholder="방 번호"><br>
+    <input type="text" id="room-code" placeholder="방 코드"><br>
     <input type="text" id="player-name" placeholder="닉네임"><br>
     <button onclick="joinRoom()" style="background-color: #3498db; color: white;">입장</button>
   </div>
@@ -226,7 +226,7 @@
           • 게임 중 브라우저가 꺼지거나 튕기면 해당 판은 <strong>자동 폴드(포기)</strong> 처리되지만, 보유 칩과 정산 기록은 서버에 안전하게 <strong>보존</strong>됩니다.
         </div>
         <div style="color: #bdc3c7;">
-          • <strong>[복구 방법]</strong> 브라우저를 다시 켜고 원래 쓰던 <strong>'방 번호'와 '닉네임'을 정확히 똑같이 입력</strong>하여 입장하면, 남은 칩을 가지고 즉시 게임에 복귀할 수 있습니다.
+          • <strong>[복구 방법]</strong> 브라우저를 다시 켜고 원래 쓰던 <strong>'방 코드'와 '닉네임'을 정확히 똑같이 입력</strong>하여 입장하면, 남은 칩을 가지고 즉시 게임에 복귀할 수 있습니다.
         </div>
       </div>
     </div>
@@ -358,7 +358,7 @@
     function joinRoom() {
       const roomCode = document.getElementById('room-code').value;
       const name = document.getElementById('player-name').value;
-      if(!roomCode || !name) return alert("방 번호와 닉네임을 입력하세요.");
+      if(!roomCode || !name) return alert("방 코드와 닉네임을 입력하세요.");
       socket.emit('join_room', { roomCode: roomCode, playerName: name }); 
     }
 
