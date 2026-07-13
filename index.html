@@ -17,14 +17,17 @@
     .pot-area { background-color: #f1c40f; color: #333; padding: 15px; font-size: 20px; font-weight: bold; border-radius: 10px; margin-bottom: 20px; }
     .card-container { display: flex; justify-content: center; gap: 5px; margin: 10px 0; min-height: 80px; }
     .card { background: white; color: black; border-radius: 6px; font-weight: bold; width: 55px; height: 80px; box-shadow: 2px 2px 6px rgba(0,0,0,0.4); display: flex; flex-direction: column; justify-content: space-between; padding: 4px; position: relative; animation: dealAnimation 0.4s ease-out; background-image: linear-gradient(to bottom right, #ffffff, #f1f2f6); }
-    /* 위쪽 마크는 왼쪽 벽(flex-start)에 붙이고 가운데 정렬 */
-    .card-top { font-size: 13px; text-align: center; line-height: 1.1; letter-spacing: -1px; align-self: flex-start; }
+    /* 카드 본체: Flexbox(자동 정렬)를 빼고 위치 기준점(relative)만 남깁니다. */
+    .card { background: white; color: black; border-radius: 6px; font-weight: bold; width: 55px; height: 80px; box-shadow: 2px 2px 6px rgba(0,0,0,0.4); position: relative; animation: dealAnimation 0.4s ease-out; background-image: linear-gradient(to bottom right, #ffffff, #f1f2f6); }
     
-    /* 가운데 큰 마크 */
-    .card-mid { font-size: 26px; text-align: center; flex-grow: 1; display: flex; align-items: center; justify-content: center; }
+    /* 좌측 상단 마크: 위에서 5px, 왼쪽에서 5px 위치에 강제 고정! */
+    .card-top { position: absolute; top: 5px; left: 5px; font-size: 13px; text-align: center; line-height: 1; letter-spacing: -1px; }
     
-    /* 아래쪽 마크는 오른쪽 벽(flex-end)에 붙인 뒤, 그 자리에서만 180도 회전! (삐져나옴 방지를 위해 line-height도 1.1로 여유를 줌) */
-    .card-bottom { font-size: 13px; text-align: center; line-height: 1.1; letter-spacing: -1px; align-self: flex-end; transform: rotate(180deg); }
+    /* 중앙 마크: 정중앙(50%)에 강제 고정! */
+    .card-mid { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 26px; }
+    
+    /* 우측 하단 마크: 아래에서 5px, 오른쪽에서 5px 위치에 강제 고정 후 회전! (이제 절대 안 삐져나갑니다) */
+    .card-bottom { position: absolute; bottom: 5px; right: 5px; font-size: 13px; text-align: center; line-height: 1; letter-spacing: -1px; transform: rotate(180deg); }
     @keyframes dealAnimation { from { transform: translateY(-30px) scale(0.8); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
     @keyframes shrinkBar { from { width: 100%; background-color: #2ecc71; } 50% { background-color: #f1c40f; } to { width: 0%; background-color: #e74c3c; } }
     .red-card { color: #e74c3c; }
