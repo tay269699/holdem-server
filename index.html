@@ -70,7 +70,7 @@
 
     /* 2. 채팅창이 최소화되었을 때의 모습 (높이를 확 줄입니다) */
     .chat-container.minimized {
-      height: 50px; /* 딱 한 줄과 버튼만 보일 만큼 높이를 줄입니다 */
+      height: 60px; /* 딱 한 줄과 버튼만 보일 만큼 높이를 줄입니다 */
     }
 
     /* 3. 최소화 상태에서는 텍스트를 입력하는 곳(전송 버튼 등)을 아예 숨깁니다 */
@@ -232,6 +232,17 @@
     const socket = io();
     let myId = '';
     let isMyHost = false;
+
+    // 👇 여기부터 아래 7줄의 코드를 복사해서 붙여넣어 주세요!
+    socket.on('connect', () => {
+      const roomCode = document.getElementById('room-code').value;
+      const name = document.getElementById('player-name').value;
+      // 이미 게임방 화면에 들어와 있는 상태에서 몰래 재연결되었다면 자동으로 서버에 재입장 요청
+      if (roomCode && name && document.getElementById('game-room').style.display === 'block') {
+        socket.emit('join_room', { roomCode: roomCode, playerName: name });
+      }
+    });
+    // 👆 여기까지입니다.
     
     // [완벽한 사운드 겹침 처리를 위한 오디오 풀(Pool) 구현]
     const soundUrls = {
