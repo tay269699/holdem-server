@@ -27,7 +27,7 @@
     .card-mid { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 26px; }
     
     /* 우측 하단 마크: 아래에서 5px, 오른쪽에서 5px 위치에 강제 고정 후 회전! (이제 절대 안 삐져나갑니다) */
-    .card-bottom { position: absolute; bottom: 5px; right: 5px; font-size: 13px; text-align: center; line-height: 1; letter-spacing: -1px; transform: rotate(180deg); }
+    
     @keyframes dealAnimation { from { transform: translateY(-30px) scale(0.8); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
     @keyframes shrinkBar { from { width: 100%; background-color: #2ecc71; } 50% { background-color: #f1c40f; } to { width: 0%; background-color: #e74c3c; } }
     .red-card { color: #e74c3c; }
@@ -574,7 +574,7 @@
             `<div class="card ${colorClass}">
               <div class="card-top">${c.rank}<br>${c.suit}</div>
               <div class="card-mid">${c.suit}</div>
-              <div class="card-bottom">${c.rank}<br>${c.suit}</div>
+              
              </div>`
           );
         }
@@ -595,7 +595,7 @@
             `<div class="card ${colorClass}">
               <div class="card-top">${c.rank}<br>${c.suit}</div>
               <div class="card-mid">${c.suit}</div>
-              <div class="card-bottom">${c.rank}<br>${c.suit}</div>
+              
              </div>`
           );
         }

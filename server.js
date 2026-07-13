@@ -677,6 +677,9 @@ io.on('connection', (socket) => {
         else if (idx === dIdx) { p.role = 'D'; }
       });
 
+      // 👇 화면에 데이터를 쏘기 전에, 타이머 시작 시간을 미리 도장 찍어둡니다!
+      room.turnStartTime = Date.now();
+
       // 방 전체에 뿌리지 않고, 각자에게 본인 카드만 보이는 안전한 상태로 개별 전송합니다.
       room.playerOrder.forEach(pId => {
         let p = room.players[pId];
