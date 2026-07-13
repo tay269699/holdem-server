@@ -77,7 +77,9 @@ function evaluateHand(holeCards, communityCards) {
 
 function distributePots(room) {
   let activeBettors = Object.values(room.players).filter(p => p.invested > 0).sort((a, b) => a.invested - b.invested);
-  let pots = []; let previousInvested = 0;
+  
+  // 1단계: 기존 방식대로 일단 금액 구간별로 팟을 잘게 쪼갭니다.
+  let rawPots = []; let previousInvested = 0;
   for (let i = 0; i < activeBettors.length; i++) {
     let p = activeBettors[i]; let contribution = p.invested - previousInvested;
     if (contribution > 0) {
@@ -86,15 +88,37 @@ function distributePots(room) {
         potAmount += contribution; let player = room.players[activeBettors[j].id];
         if (player.state !== 'folded' && player.state !== 'busted') eligiblePlayers.push(player);
       }
-      if (potAmount > 0) pots.push({ amount: potAmount, eligible: eligiblePlayers });
+      if (potAmount > 0) rawPots.push({ amount: potAmount, eligible: eligiblePlayers });
       previousInvested = p.invested;
     }
   }
+
+  // 2단계: (🔥추가된 핵심 로직) 먹을 수 있는 자격자 명단이 똑같은 팟들은 하나의 팟으로 합칩니다!
+  let pots = [];
+  rawPots.forEach(currentPot => {
+    if (pots.length === 0) {
+      pots.push(currentPot);
+    } else {
+      let lastPot = pots[pots.length - 1];
+      // 자격이 있는 사람들의 ID를 문자로 이어서 비교합니다.
+      let lastIds = lastPot.eligible.map(p => p.id).sort().join(',');
+      let currentIds = currentPot.eligible.map(p => p.id).sort().join(',');
+      
+      if (lastIds === currentIds) {
+        // 먹을 사람이 완전히 똑같으면 굳이 사이드팟으로 쪼개지 않고 돈을 합칩니다.
+        lastPot.amount += currentPot.amount; 
+      } else {
+        // 누군가 올인해서 먹을 자격자가 달라졌을 때만 진짜 사이드 팟으로 분리합니다.
+        pots.push(currentPot); 
+      }
+    }
+  });
+
+  // 3단계: 화면에 텍스트로 출력하는 로직 (기존과 동일)
   let msgs = [];
   pots.forEach((pot, index) => {
     if (pot.eligible.length === 1) {
       let winner = pot.eligible[0]; winner.chips += pot.amount;
-      // 👇 단독 승자 하이라이트 적용 (초록색 굵은 글씨)
       msgs.push(pots.length > 1 ? `💰 사이드 팟 ${index+1} (${pot.amount.toLocaleString()}칩)\n 👑 <b style="color:#2ecc71; font-size:18px;">승자: ${winner.name}</b>` : `💰 총 팟 (${pot.amount.toLocaleString()}칩)\n 👑 <b style="color:#2ecc71; font-size:18px;">승자: ${winner.name}</b>`);
     } else if (pot.eligible.length > 1) {
       let results = pot.eligible.map(p => {
@@ -111,7 +135,6 @@ function distributePots(room) {
         if (idx === 0) w.pRef.chips += remainder; 
       });
       
-      // 👇 승자(winners) 배열의 길이를 확인하여 단독 승자와 공동 승자를 완벽하게 구분합니다!
       if (winners.length === 1) {
         msgs.push(pots.length > 1 ? `💰 사이드 팟 ${index+1} (${pot.amount.toLocaleString()}칩)\n 👑 <b style="color:#2ecc71; font-size:18px;">승자: ${winners[0].pRef.name}</b> (${winners[0].handName})` : `💰 총 팟 (${pot.amount.toLocaleString()}칩)\n 👑 <b style="color:#2ecc71; font-size:18px;">승자: ${winners[0].pRef.name}</b> (${winners[0].handName})`);
       } else {
