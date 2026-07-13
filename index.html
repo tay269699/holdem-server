@@ -245,6 +245,10 @@
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
+
+    // 👇 Render 무료 서버 수면 방지용: 10분(600,000ms)마다 서버에 신호를 보내 재우지 않게 합니다.
+    setInterval(() => { fetch('/ping').catch(() => {}); }, 600000);
+
     let myId = '';
     let isMyHost = false;
 

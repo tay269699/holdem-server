@@ -23,6 +23,9 @@ const rankValues = { '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, '10
 
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
 
+// 👇 이 한 줄을 추가하세요. (화면에서 10분마다 여기로 똑똑 노크를 해서 서버가 잠들지 않게 깨웁니다)
+app.get('/ping', (req, res) => { res.send('pong'); });
+
 function createDeck() {
   const suits = ['♠', '♥', '♦', '♣']; const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
   let deck = [];
@@ -445,6 +448,11 @@ io.on('connection', (socket) => {
   socket.on('join_room', (data) => {
     const roomCode = data.roomCode;
     const playerName = data.playerName;
+
+    // 👇 이 3줄을 추가하세요. 방이 30개 이상 만들어지는 것을 막아 무료 서버 다운을 방지합니다.
+    if (Object.keys(rooms).length >= 30 && !rooms[roomCode]) {
+      return socket.emit('join_error', '⚠️ 서버가 꽉 찼습니다 (최대 30개 방). 잠시 후 다시 시도해주세요.');
+    }
     
     socket.join(roomCode); socket.roomCode = roomCode;
 
