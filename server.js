@@ -270,6 +270,9 @@ function handleAction(room, roomCode, player, data, io) {
     broadcastGameState(io, roomCode, room);
     
     if (room.stage < 4) {
+      // 👇 🔥 [버그 수정 핵심] 1초 대기열에 들어가기 전에, 즉시 턴을 박탈하여 중복 클릭 공격을 막습니다!
+      room.currentTurnId = null;
+      
       // 👇 1초(1000ms) 딜레이를 줍니다.
       setTimeout(() => {
         room.stage++; room.highestBet = 0; 
@@ -330,17 +333,19 @@ function processBotDecision(room, roomCode, bot, io) {
       }
     } 
     // 🔹 평화로운 상황 (베팅 금액이 작을 때)
-    else {
-      if (v1 === v2 && v1 >= 10) { 
-        action = 'raise'; raiseAmt = room.minRaise * 2; // 좋은 페어면 크게 레이즈
-      } else if (v1 === v2 || maxV >= 10) { 
-        action = 'call'; 
-        if (callAmount === 0 && rand < 0.2) { action = 'raise'; raiseAmt = room.minRaise; } // 20% 확률 블러핑
-      } else {
-        if (callAmount === 0 || callAmount <= room.minRaise) { action = 'call'; } // 공짜면 일단 봄
-        else if (rand < 0.1) { action = 'call'; } // 10% 멍청한 콜 유지
+      else {
+        if (v1 === v2 && v1 >= 10) { 
+          action = 'raise'; raiseAmt = room.minRaise * 2; // 좋은 페어면 크게 레이즈
+        } else if (v1 === v2 || maxV >= 10) { 
+          action = 'call'; 
+          if (callAmount === 0 && rand < 0.2) { action = 'raise'; raiseAmt = room.minRaise; } // 20% 확률 블러핑
+        } else {
+          // 👇 해결된 부분: 돈을 내야 한다면 90% 확률로 얌전히 죽음
+          if (callAmount === 0) { action = 'call'; } // 이미 돈을 냈거나 공짜면 체크로 묻어감
+          else if (rand < 0.1) { action = 'call'; } // 10% 확률로 멍청하게 콜 (약간의 변수 창출)
+          else { action = 'fold'; } // 나머지 90%는 정상적으로 폴드(포기)함
+        }
       }
-    }
   } else { 
     // [2] 플랍 이후 (바닥 카드가 깔린 상태)
     let evalResult = evaluateHand(bot.cards, room.communityCards);
