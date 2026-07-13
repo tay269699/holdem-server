@@ -16,7 +16,10 @@
     .timer-board { background-color: #e74c3c; color: white; padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 16px; font-weight: bold; display: flex; justify-content: space-around; }
     .pot-area { background-color: #f1c40f; color: #333; padding: 15px; font-size: 20px; font-weight: bold; border-radius: 10px; margin-bottom: 20px; }
     .card-container { display: flex; justify-content: center; gap: 5px; margin: 10px 0; min-height: 80px; }
-    .card { background: white; color: black; padding: 15px 10px; border-radius: 5px; font-weight: bold; font-size: 20px; min-width: 35px; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); animation: dealAnimation 0.4s ease-out; }
+    .card { background: white; color: black; border-radius: 6px; font-weight: bold; width: 55px; height: 80px; box-shadow: 2px 2px 6px rgba(0,0,0,0.4); display: flex; flex-direction: column; justify-content: space-between; padding: 4px; position: relative; animation: dealAnimation 0.4s ease-out; background-image: linear-gradient(to bottom right, #ffffff, #f1f2f6); }
+    .card-top { font-size: 13px; text-align: left; line-height: 1; letter-spacing: -1px; }
+    .card-mid { font-size: 28px; text-align: center; flex-grow: 1; display: flex; align-items: center; justify-content: center; }
+    .card-bottom { font-size: 13px; text-align: right; line-height: 1; transform: rotate(180deg); letter-spacing: -1px; }
     @keyframes dealAnimation { from { transform: translateY(-30px) scale(0.8); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
     @keyframes shrinkBar { from { width: 100%; background-color: #2ecc71; } 50% { background-color: #f1c40f; } to { width: 0%; background-color: #e74c3c; } }
     .red-card { color: #e74c3c; }
@@ -305,7 +308,8 @@
 
     // [수정할 코드 1]
     function showCustomAlert(msg, isResult = false) {
-      document.getElementById('custom-modal-text').innerText = msg;
+      // 👇 innerText를 innerHTML로 변경하여 색상이나 굵기(HTML 태그)를 적용할 수 있게 합니다.
+      document.getElementById('custom-modal-text').innerHTML = msg;
       document.getElementById('custom-modal-overlay').style.display = 'flex';
 
       // isResult가 true라고 전달될 때만 결과음 재생!
@@ -557,8 +561,14 @@
         for (let i = startIndex; i < myInfo.cards.length; i++) {
           let c = myInfo.cards[i];
           let colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red-card' : '';
-          // innerHTML 덮어쓰기 대신, insertAdjacentHTML을 써서 새 요소만 추가합니다.
-          container.insertAdjacentHTML('beforeend', `<div class="card ${colorClass}">${c.suit}${c.rank}</div>`);
+          // 실제 포커 카드 같은 3단 레이아웃으로 출력합니다.
+          container.insertAdjacentHTML('beforeend', 
+            `<div class="card ${colorClass}">
+              <div class="card-top">${c.rank}<br>${c.suit}</div>
+              <div class="card-mid">${c.suit}</div>
+              <div class="card-bottom">${c.rank}<br>${c.suit}</div>
+             </div>`
+          );
         }
       }
 
@@ -573,7 +583,13 @@
         for (let i = startIndex; i < gameData.communityCards.length; i++) {
           let c = gameData.communityCards[i];
           let colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red-card' : '';
-          commContainer.insertAdjacentHTML('beforeend', `<div class="card ${colorClass}">${c.suit}${c.rank}</div>`);
+          commContainer.insertAdjacentHTML('beforeend', 
+            `<div class="card ${colorClass}">
+              <div class="card-top">${c.rank}<br>${c.suit}</div>
+              <div class="card-mid">${c.suit}</div>
+              <div class="card-bottom">${c.rank}<br>${c.suit}</div>
+             </div>`
+          );
         }
       }
 

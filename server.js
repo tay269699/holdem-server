@@ -94,7 +94,8 @@ function distributePots(room) {
   pots.forEach((pot, index) => {
     if (pot.eligible.length === 1) {
       let winner = pot.eligible[0]; winner.chips += pot.amount;
-      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount.toLocaleString()}칩): ${winner.name}` : `총 팟(${pot.amount.toLocaleString()}칩): ${winner.name}`);
+      // 👇 단독 승자 하이라이트 적용 (초록색 굵은 글씨)
+      msgs.push(pots.length > 1 ? `💰 사이드 팟 ${index+1} (${pot.amount.toLocaleString()}칩)\n 👑 <b style="color:#2ecc71; font-size:18px;">승자: ${winner.name}</b>` : `💰 총 팟 (${pot.amount.toLocaleString()}칩)\n 👑 <b style="color:#2ecc71; font-size:18px;">승자: ${winner.name}</b>`);
     } else if (pot.eligible.length > 1) {
       let results = pot.eligible.map(p => {
         let evalResult = evaluateHand(p.cards, room.communityCards);
@@ -103,13 +104,14 @@ function distributePots(room) {
       results.sort((a, b) => b.score - a.score);
       let highestScore = results[0].score; let winners = results.filter(r => r.score === highestScore);
       let splitAmount = Math.floor(pot.amount / winners.length);
-      let remainder = pot.amount % winners.length; // 나누고 남은 짜투리 칩 계산
+      let remainder = pot.amount % winners.length; 
       
       winners.forEach((w, idx) => { 
         w.pRef.chips += splitAmount; 
-        if (idx === 0) w.pRef.chips += remainder; // 남은 짜투리 칩은 무승부 승자 중 첫 번째 사람에게 지급
+        if (idx === 0) w.pRef.chips += remainder; 
       });
-      msgs.push(pots.length > 1 ? `사이드 팟 ${index+1}(${pot.amount.toLocaleString()}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})` : `총 팟(${pot.amount.toLocaleString()}칩): ${winners.map(w=>w.pRef.name).join(", ")} (${winners[0].handName})`);
+      // 👇 공동 승자 하이라이트 적용 (파란색 굵은 글씨)
+      msgs.push(pots.length > 1 ? `💰 사이드 팟 ${index+1} (${pot.amount.toLocaleString()}칩)\n 🤝 <b style="color:#3498db; font-size:18px;">공동 승자: ${winners.map(w=>w.pRef.name).join(", ")}</b> (${winners[0].handName})` : `💰 총 팟 (${pot.amount.toLocaleString()}칩)\n 🤝 <b style="color:#3498db; font-size:18px;">공동 승자: ${winners.map(w=>w.pRef.name).join(", ")}</b> (${winners[0].handName})`);
     }
   });
   return msgs;
@@ -124,8 +126,13 @@ function processShowdown(io, roomCode) {
     let p = room.players[id]; let evalResult = evaluateHand(p.cards, room.communityCards);
     finalMsg += `- ${p.name}: ${evalResult.handName} (${p.cards.map(c => c.suit + c.rank).join(', ')})\n`; 
   });
-  finalMsg += `\n🎉 [팟 분배 결과]\n` + msgs.join('\n');
+  finalMsg += `\n🎉 [팟 분배 결과]\n` + msgs.join('\n\n'); // 간격을 띄워서 더 읽기 쉽게 만듦
   broadcastGameState(io, roomCode, room);
+  
+  // 👇 채팅 로그에도 결과 요약 전송 (HTML 태그를 떼어내고 깔끔하게 텍스트만 전송)
+  let logMsg = msgs.join(' / ').replace(/<[^>]*>?/gm, '').replace(/\n/g, ' '); 
+  io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🏆 ${logMsg}` });
+
   setTimeout(() => { io.to(roomCode).emit('system_message', finalMsg); }, 1500);
 }
 
@@ -207,7 +214,12 @@ function handleAction(room, roomCode, player, data, io) {
   if (activePlayers.length === 1) {
     const winner = room.players[activePlayers[0]];
     winner.chips += room.pot; room.stage = 5; room.uncontestedWinner = winner.id; 
-    setTimeout(() => { io.to(roomCode).emit('system_message', `🎉 전원 폴드!\n[${winner.name}]님이 패를 숨긴 채 ${room.pot.toLocaleString()}칩을 가져갑니다.`); }, 500);
+    setTimeout(() => { 
+      // 👇 모달창 강조
+      io.to(roomCode).emit('system_message', `🎉 전원 폴드!\n👑 <b style="color:#2ecc71; font-size:18px;">승자: ${winner.name}</b>\n\n패를 숨긴 채 ${room.pot.toLocaleString()}칩을 가져갑니다.`); 
+      // 👇 채팅창 로그 전송
+      io.to(roomCode).emit('chat_message', { type: 'sys', msg: `🏆 전원 폴드로 [${winner.name}] 님이 ${room.pot.toLocaleString()}칩 획득!` });
+    }, 500);
     broadcastGameState(io, roomCode, room);
     return;
   }
@@ -680,6 +692,21 @@ io.on('connection', (socket) => {
         setTimeout(() => { processBotDecision(room, socket.roomCode, room.players[room.currentTurnId], io); }, 1500);
       } else if (room.currentTurnId) {
         io.to(room.currentTurnId).emit('play_sound', 'my_turn');
+        
+        // 👇 첫 턴(UTG)에도 20초 타이머를 완벽하게 적용합니다!
+        room.turnStartTime = Date.now();
+        if (room.turnTimer) clearTimeout(room.turnTimer);
+        const expectedTurnId = room.currentTurnId;
+        
+        room.turnTimer = setTimeout(() => {
+          if (rooms[socket.roomCode] === room && room.currentTurnId === expectedTurnId) {
+            let p = room.players[expectedTurnId];
+            let callAmount = room.highestBet - p.currentBet;
+            let timeoutAction = callAmount === 0 ? 'call' : 'fold';
+            handleAction(room, socket.roomCode, p, { action: timeoutAction }, io);
+            io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `⏰ [${p.name}] 님이 시간 초과로 자동 진행(폴드/체크) 되었습니다.` });
+          }
+        }, 20000); // 20초 카운트다운
       }
     }
   });
