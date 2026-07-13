@@ -615,7 +615,8 @@
       gameData.playerOrder.forEach(id => {
         const p = gameData.players[id];
         if (!p) return; // 혹시 모를 에러 방지
-        const role = p.role ? `<span class="role-badge">${p.role}</span>` : '';
+        // 뱃지를 상자 상단 한가운데(정중앙)에 예쁘게 띄웁니다!
+        const role = p.role ? `<span class="role-badge" style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); border: 1px solid #95a5a6; box-shadow: 2px 2px 5px rgba(0,0,0,0.6); font-size: 11px; z-index: 10;">${p.role}</span>` : '';
         const isTurn = p.id === gameData.currentTurnId;
         
         let stateMark = '';
@@ -641,8 +642,9 @@
         }
 
         board.innerHTML += `
-          <div style="background: #2c3e50; padding: 10px; border-radius: 8px; border: 2px solid transparent; width: 130px; opacity: ${opacity};" class="${turnClass}">
-            <div style="font-weight: bold; font-size: 14px; word-break: keep-all;">${p.name} ${role}</div>
+          <div style="background: #2c3e50; padding: 10px; border-radius: 8px; border: 2px solid transparent; width: 130px; opacity: ${opacity}; position: relative;" class="${turnClass}">
+            ${role}
+            <div style="font-weight: bold; font-size: 13px; line-height: 1.4; word-break: keep-all; height: 36px; display: flex; align-items: center; justify-content: center;">${p.name}</div>
             <div style="font-size: 13px; margin: 5px 0;">칩: ${p.chips.toLocaleString()}</div>
             <div style="color: #f39c12; font-size: 12px; margin-top: 5px;">베팅: ${p.currentBet.toLocaleString()} <br>${stateMark}</div>
             ${timerBar}
