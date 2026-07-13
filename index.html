@@ -17,8 +17,8 @@
     .pot-area { background-color: #f1c40f; color: #333; padding: 15px; font-size: 20px; font-weight: bold; border-radius: 10px; margin-bottom: 20px; }
     .card-container { display: flex; justify-content: center; gap: 5px; margin: 10px 0; min-height: 80px; }
     .card { background: white; color: black; border-radius: 6px; font-weight: bold; width: 55px; height: 80px; box-shadow: 2px 2px 6px rgba(0,0,0,0.4); display: flex; flex-direction: column; justify-content: space-between; padding: 4px; position: relative; animation: dealAnimation 0.4s ease-out; background-image: linear-gradient(to bottom right, #ffffff, #f1f2f6); }
-    /* 카드 본체: Flexbox(자동 정렬)를 빼고 위치 기준점(relative)만 남깁니다. */
-    .card { background: white; color: black; border-radius: 6px; font-weight: bold; width: 55px; height: 80px; box-shadow: 2px 2px 6px rgba(0,0,0,0.4); position: relative; animation: dealAnimation 0.4s ease-out; background-image: linear-gradient(to bottom right, #ffffff, #f1f2f6); }
+    /* 👇 font-family: 'Arial', sans-serif; 를 맨 앞에 추가했습니다! */
+    .card { font-family: 'Arial', sans-serif; background: white; color: black; border-radius: 6px; font-weight: bold; width: 55px; height: 80px; box-shadow: 2px 2px 6px rgba(0,0,0,0.4); position: relative; animation: dealAnimation 0.4s ease-out; background-image: linear-gradient(to bottom right, #ffffff, #f1f2f6); }
     
     /* 좌측 상단 마크: 위에서 5px, 왼쪽에서 5px 위치에 강제 고정! */
     .card-top { position: absolute; top: 5px; left: 5px; font-size: 13px; text-align: center; line-height: 1; letter-spacing: -1px; }
