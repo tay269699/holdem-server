@@ -70,7 +70,7 @@
 
     /* 2. 채팅창이 최소화되었을 때의 모습 (높이를 확 줄입니다) */
     .chat-container.minimized {
-      height: 60px; /* 딱 한 줄과 버튼만 보일 만큼 높이를 줄입니다 */
+      height: auto; /* 딱 한 줄과 버튼만 보일 만큼 높이를 줄입니다 */
     }
 
     /* 3. 최소화 상태에서는 텍스트를 입력하는 곳(전송 버튼 등)을 아예 숨깁니다 */
@@ -95,6 +95,10 @@
       white-space: nowrap; /* 글자가 길어도 다음 줄로 안 넘어가게 합니다 */
       overflow: hidden;    /* 화면을 넘치는 글자는 숨깁니다 */
       text-overflow: ellipsis; /* 넘치는 글자 끝에는 ... 처리를 합니다 */
+      /* 👇 아래 3줄을 추가합니다. 글자 밑에 깔려있던 투명한 여백과 선을 완전히 없애줍니다. */
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
     }
     /* 👆 여기까지 복사하세요 */
   </style>
