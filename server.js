@@ -170,7 +170,8 @@ function handleAction(room, roomCode, player, data, io) {
     let raiseAmount = parseInt(data.amount);
     let maxPossibleBet = player.currentBet + player.chips;
     
-    if (isNaN(raiseAmount)) raiseAmount = room.minRaise;
+    // 👇 이 부분이 변경되었습니다! (음수 값이 들어오면 강제로 최소 베팅금으로 바꿔버림)
+    if (isNaN(raiseAmount) || raiseAmount <= 0) raiseAmount = room.minRaise; 
     if (raiseAmount < room.minRaise && raiseAmount !== maxPossibleBet) { raiseAmount = room.minRaise; }
 
     let cost = raiseAmount - player.currentBet;
@@ -602,8 +603,8 @@ io.on('connection', (socket) => {
           p.rebuyCount += p.pendingRebuy;
           p.pendingRebuy = 0;
         }
-        // [봇 디테일 개선] 봇 칩이 기본 참가비(200) 미만으로 떨어지면 리바이시킵니다.
-        if (p.isBot && p.chips < 200) { p.chips = 10000; p.rebuyCount++; }
+        // 👇 = 기호를 += 기호로 바꾸어 남은 칩에 더해지도록 수정했습니다.
+        if (p.isBot && p.chips < 200) { p.chips += 10000; p.rebuyCount++; }
       });
 
       const currBlinds = BLIND_STRUCTURE[room.blindLevel] || BLIND_STRUCTURE[BLIND_STRUCTURE.length - 1];
