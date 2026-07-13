@@ -336,6 +336,24 @@ function processBotDecision(room, roomCode, bot, io) {
     foldProb = 1.5;  // 남이 치고 나오면 빨리 도망감
     raiseAggressiveness = 0.3; // 레이즈를 해도 판돈의 30%만 소심하게 침
   }
+  
+  // 🌟 [신규 추가 3] 매몰 비용(Sunk Cost) 및 팟 오즈(Pot Odds) 인지 로직 탑재!
+  
+  // 1. 팟 오즈(가성비): 내야 할 돈 대비 먹을 수 있는 총 상금의 비율 (낮을수록 가성비가 좋음)
+  let potOdds = callAmount > 0 ? callAmount / (room.pot + callAmount) : 0;
+  
+  // 2. 투자 비율: 내 초기 자본(현재 칩 + 이미 베팅한 돈) 대비 이미 판에 밀어넣은 돈의 비율
+  let totalWealth = bot.chips + bot.invested;
+  let investmentRatio = totalWealth > 0 ? bot.invested / totalWealth : 0;
+
+  // 3. 팟 커밋 상태 판별: 이미 내 전 재산의 50% 이상을 넣었다면 "아까워서라도 끝까지 간다!"
+  let isCommitted = investmentRatio >= 0.5;
+
+  if (isCommitted) {
+    foldProb *= 0.1; // 이미 돈을 많이 썼다면 포기(폴드)할 확률을 1/10로 대폭 줄임
+  } else if (potOdds > 0 && potOdds < 0.2) {
+    foldProb *= 0.5; // 먹을 상금이 낼 돈에 비해 엄청 크다면(가성비 갑) 포기 확률 절반으로 줄임
+  }
 
   // 🌟 [신규 추가 2] '판돈(Pot)' 기반 레이즈 계산 함수 (사람 냄새 나는 노이즈 추가)
   function getDynamicRaise() {
@@ -420,6 +438,11 @@ function processBotDecision(room, roomCode, bot, io) {
 
   // 👇 [보안 패치 유지] 숏 올인 맞은 봇 데드락 방지
   if (action === 'raise' && bot.acted) { 
+    action = 'call'; 
+  }
+
+  // 🌟 [최종 보정] 아까워서 못 죽는 상태(팟 커밋)인데 주사위 굴려서 어쩌다 폴드가 나왔다면? 강제로 콜로 바꿔줌!
+  if (action === 'fold' && isCommitted) { 
     action = 'call'; 
   }
 
