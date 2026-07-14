@@ -371,9 +371,10 @@ function processBotDecision(room, roomCode, bot, io) {
 
   // 🌟 [신규 봇 지능 업그레이드 1] 포지션(자리) 인지 시스템
   let activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing');
-  let myPosIdx = activePlayers.indexOf(bot.id);
-  let dealerPosIdx = activePlayers.indexOf(room.dealerId);
-  let distance = (myPosIdx - dealerPosIdx + activePlayers.length) % activePlayers.length;
+  // 💡 [기억상실 버그 수정] 딜러가 죽어도 자리를 안 까먹게, 변하지 않는 '원래 좌석표(playerOrder)'를 기준으로 거리를 계산!
+  let myPosIdx = room.playerOrder.indexOf(bot.id);
+  let dealerPosIdx = room.playerOrder.indexOf(room.dealerId);
+  let distance = (myPosIdx - dealerPosIdx + room.playerOrder.length) % room.playerOrder.length;
   
   // 딜러 버튼(가장 늦게 행동하는 좋은 자리)에 가까울수록 블러핑을 자주 하고, 덜 도망감
   if (distance === activePlayers.length - 1 || distance === 0) {
@@ -486,13 +487,15 @@ function processBotDecision(room, roomCode, bot, io) {
     else if (evalResult.level >= 1) { 
       if (callAmount === 0) { action = rand < 0.6 ? 'raise' : 'call'; raiseAmt = getDynamicRaise() * 0.5; } 
       else {
-        // 👇 플랍 이후에도 공포가 적용됨!
-        if (callAmount <= bot.chips * 0.5) action = rand < 0.2 ? 'raise' : 'call'; 
-        else action = rand < (0.7 * foldProb) ? 'fold' : 'call'; 
+        // 👇 베팅액이 적더라도, 공포 수치나 패가 약해서 foldProb가 높으면 도망갈 수 있게 수정!
+        if (callAmount <= bot.chips * 0.5) {
+          if (rand < (0.2 * foldProb)) action = 'fold'; // 추가된 폴드(도망) 로직
+          else action = rand < 0.2 ? 'raise' : 'call'; 
+        }
+        else {
+          action = rand < (0.7 * foldProb) ? 'fold' : 'call'; 
+        }
       }
-    } else { 
-      if (callAmount === 0) { action = rand < (0.2 * bluffProb) ? 'raise' : 'call'; raiseAmt = getDynamicRaise() * 0.5; } 
-      else { action = rand < (0.1 * bluffProb) ? 'raise' : 'fold'; raiseAmt = getDynamicRaise(); }
     }
   }
 
@@ -573,7 +576,13 @@ function processBotDecision(room, roomCode, bot, io) {
   // [휴리스틱 2] 함정 파기 (Check-Raise 트랩)
   if (callAmount === 0 && room.stage > 0) {
     let finalEval = evaluateHand(bot.cards, room.communityCards);
-    if (finalEval.level >= 4 && action === 'raise') {
+    
+    // 💡 내 뒤에 아직 행동을 안 한 플레이어가 몇 명인지 직접 세어봅니다.
+    let unactedPlayers = activePlayers.filter(id => id !== bot.id && !room.players[id].acted);
+    let amILastToAct = (unactedPlayers.length === 0);
+
+    // 내가 가장 마지막 순서가 아닐 때(!amILastToAct)만 함정을 팜!
+    if (finalEval.level >= 4 && action === 'raise' && !amILastToAct) {
       if (Math.random() < 0.3) { action = 'call'; } // 레이즈를 체크로 바꿈 (함정)
     }
   }
