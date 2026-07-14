@@ -369,6 +369,42 @@ function processBotDecision(room, roomCode, bot, io) {
     foldProb *= fearFactor; 
   }
 
+  // 🌟 [신규 봇 지능 업그레이드 1] 포지션(자리) 인지 시스템
+  let activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing');
+  let myPosIdx = activePlayers.indexOf(bot.id);
+  let dealerPosIdx = activePlayers.indexOf(room.dealerId);
+  let distance = (myPosIdx - dealerPosIdx + activePlayers.length) % activePlayers.length;
+  
+  // 딜러 버튼(가장 늦게 행동하는 좋은 자리)에 가까울수록 블러핑을 자주 하고, 덜 도망감
+  if (distance === activePlayers.length - 1 || distance === 0) {
+    bluffProb *= 1.3; foldProb *= 0.8; 
+  } else if (distance === 1 || distance === 2) {
+    // 얼리 포지션 (가장 먼저 행동해야 하는 나쁜 자리)에서는 몸을 사림
+    bluffProb *= 0.7; foldProb *= 1.3; 
+  }
+
+  // 🌟 [신규 봇 지능 업그레이드 2] 바닥 카드 위험도 & 약한 키커 인지
+  if (room.stage > 0) {
+    let boardSuits = { '♠':0, '♥':0, '♦':0, '♣':0 };
+    room.communityCards.forEach(c => boardSuits[c.suit]++);
+    let maxSuit = Math.max(...Object.values(boardSuits));
+    
+    let evalResult = evaluateHand(bot.cards, room.communityCards);
+    
+    // ① 위험한 보드 감지: 바닥에 같은 무늬가 3장 이상 깔렸는데 내 패가 플러시(레벨 5) 미만이면 위험을 감지하고 도망갈 확률을 대폭 올림
+    if (maxSuit >= 3 && evalResult.level < 5) {
+      foldProb *= 1.8; 
+    }
+    
+    // ② 약한 원페어 인지: 족보가 '원페어(레벨 1)'이긴 하지만, 숫자가 10 이하라면 누군가 세게 베팅했을 때 쉽게 죽음
+    if (evalResult.level === 1) { 
+      let myPairVal = Math.max(rankValues[bot.cards[0].rank], rankValues[bot.cards[1].rank]);
+      if (myPairVal <= 10) { 
+        if (callAmount > room.highestBet * 0.5) foldProb *= 1.5;
+      }
+    }
+  }
+
   // 3. [매몰 비용 & 팟 오즈]
   let potOdds = callAmount > 0 ? callAmount / (room.pot + callAmount) : 0;
   let totalWealth = bot.chips + bot.invested;
