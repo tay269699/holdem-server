@@ -371,16 +371,17 @@ function processBotDecision(room, roomCode, bot, io) {
 
   // 🌟 [신규 봇 지능 업그레이드 1] 포지션(자리) 인지 시스템
   let activePlayers = room.playerOrder.filter(id => room.players[id].state === 'playing');
-  // 💡 [기억상실 버그 수정] 딜러가 죽어도 자리를 안 까먹게, 변하지 않는 '원래 좌석표(playerOrder)'를 기준으로 거리를 계산!
-  let myPosIdx = room.playerOrder.indexOf(bot.id);
-  let dealerPosIdx = room.playerOrder.indexOf(room.dealerId);
-  let distance = (myPosIdx - dealerPosIdx + room.playerOrder.length) % room.playerOrder.length;
   
-  // 딜러 버튼(가장 늦게 행동하는 좋은 자리)에 가까울수록 블러핑을 자주 하고, 덜 도망감
-  if (distance === activePlayers.length - 1 || distance === 0) {
+  // 💡 [버그 수정] 사람들이 폴드할 때마다 자리가 꼬이는 문제 해결!
+  // 내 뒤에 아직 행동을 안 한 사람(unactedPlayers)이 몇 명인지 직접 세어봅니다.
+  let unactedPlayers = activePlayers.filter(id => id !== bot.id && !room.players[id].acted);
+  let peopleBehindMe = unactedPlayers.length;
+
+  // 내 뒤에 대기 중인 사람이 0~1명이면 (내가 마지막이거나 끝에서 두 번째면) -> 좋은 자리
+  if (peopleBehindMe === 0 || peopleBehindMe === 1) {
     bluffProb *= 1.3; foldProb *= 0.8; 
-  } else if (distance === 1 || distance === 2) {
-    // 얼리 포지션 (가장 먼저 행동해야 하는 나쁜 자리)에서는 몸을 사림
+  } else if (peopleBehindMe >= activePlayers.length - 2 && activePlayers.length > 2) {
+    // 내 뒤에 기다리는 사람이 아주 많다면 (내가 맨 처음으로 행동해야 한다면) -> 나쁜 자리
     bluffProb *= 0.7; foldProb *= 1.3; 
   }
 
@@ -398,10 +399,20 @@ function processBotDecision(room, roomCode, bot, io) {
     }
     
     // ② 약한 원페어 인지: 족보가 '원페어(레벨 1)'이긴 하지만, 숫자가 10 이하라면 누군가 세게 베팅했을 때 쉽게 죽음
-    if (evalResult.level === 1) { 
-      let myPairVal = Math.max(rankValues[bot.cards[0].rank], rankValues[bot.cards[1].rank]);
-      if (myPairVal <= 10) { 
-        if (callAmount > room.highestBet * 0.5) foldProb *= 1.5;
+    if (evalResult.level === 1) {
+      // 💡 내가 진짜로 맞춘 숫자가 무엇인지 정확히 검사합니다.
+      let isPocketPair = (bot.cards[0].rank === bot.cards[1].rank);
+      let hitCard = bot.cards.find(bc => room.communityCards.some(cc => cc.rank === bc.rank));
+
+      if (!isPocketPair && !hitCard) {
+        // 바닥에 깔린 페어일 뿐, 나는 빗맞은 상태(사실상 하이카드)라면 무조건 쫄보 모드!
+        if (callAmount > 0) foldProb *= 1.8;
+      } else {
+        // 진짜 내 카드가 페어가 된 경우, 그 숫자가 10 이하면 약하다고 판단
+        let myPairVal = isPocketPair ? rankValues[bot.cards[0].rank] : rankValues[hitCard.rank];
+        if (myPairVal <= 10 && callAmount > room.highestBet * 0.5) {
+           foldProb *= 1.5;
+        }
       }
     }
   }
@@ -546,7 +557,8 @@ function processBotDecision(room, roomCode, bot, io) {
   // 🌟 [순서 조정 1: 블러핑 라인] - 제일 먼저 뻥카를 칠지 말지 가볍게 결정합니다.
   // [휴리스틱 4] 삥뜯기 (블라인드 스틸)
   if (room.stage === 0 && room.highestBet === getBlinds(room.blindLevel).bb && action !== 'raise') {
-    if (typeof distance !== 'undefined' && (distance === activePlayers.length - 1 || distance === activePlayers.length - 2)) {
+    // 💡 distance 대신 peopleBehindMe를 사용하여 안전하게 수정! (내 뒤에 2명 이하로 남았을 때 삥뜯기 시도)
+    if (typeof peopleBehindMe !== 'undefined' && peopleBehindMe <= 2) {
       if (Math.random() < 0.5) { action = 'raise'; raiseAmt = getBlinds(room.blindLevel).bb * 2.5; }
     }
   }
