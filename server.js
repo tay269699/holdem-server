@@ -445,6 +445,11 @@ function processBotDecision(room, roomCode, bot, io) {
           raiseAmt = room.highestBet + (bbAmt * 2); // 기본 3BB 레이즈
         } else {
           action = 'call'; 
+          // 💡 [프리플랍 ATM 버그 수정] K, Q, J가 있어도 짝꿍 패(키커)가 8 이하라면 60% 확률로 얌전히 폴드!
+          if (v1 !== v2 && minV <= 8 && callAmount > 0 && rand < (0.6 * foldProb)) {
+            action = 'fold'; 
+          }
+          // 기존 거액 베팅 방어 로직 유지
           if (callAmount >= bot.chips * (0.3 / foldProb) && rand < (0.8 * foldProb)) action = 'fold'; 
         }
       } 
@@ -465,7 +470,19 @@ function processBotDecision(room, roomCode, bot, io) {
     // [플랍 이후 로직은 기존과 완전히 동일하게 유지]
     let evalResult = evaluateHand(bot.cards, room.communityCards);
 // ... 생략 (이후 코드는 건드리지 않음) ...
-    if (evalResult.level >= 3) { action = 'raise'; raiseAmt = getDynamicRaise(); } 
+    if (evalResult.level >= 3) { 
+      // 💡 [버그 수정] 내 패가 아무리 좋아도(트리플, 스트레이트) 바닥에 같은 무늬가 4장이면 브레이크를 밟아야 함!
+      let boardSuits = { '♠':0, '♥':0, '♦':0, '♣':0 };
+      room.communityCards.forEach(c => boardSuits[c.suit]++);
+      let maxBoardSuit = Math.max(...Object.values(boardSuits));
+
+      if (maxBoardSuit >= 4 && evalResult.level < 5) {
+        // 바닥에 플러시 위협이 있는데 난 플러시가 아니면, 무지성 레이즈를 포기하고 콜만 하거나 도망감!
+        action = rand < (0.4 * foldProb) ? 'fold' : 'call';
+      } else {
+        action = 'raise'; raiseAmt = getDynamicRaise(); 
+      }
+    } 
     else if (evalResult.level >= 1) { 
       if (callAmount === 0) { action = rand < 0.6 ? 'raise' : 'call'; raiseAmt = getDynamicRaise() * 0.5; } 
       else {
@@ -523,104 +540,78 @@ function processBotDecision(room, roomCode, bot, io) {
     }
   }
 
-  // 🌟 [최종 진화 휴리스틱 1] 드로우(뽀대) 쫓아가기 (플러시 드로우 인지)
-  if (room.stage === 1 || room.stage === 2) { // 플랍이나 턴일 때만
-    let suitsCount = { '♠':0, '♥':0, '♦':0, '♣':0 };
-    bot.cards.concat(room.communityCards).forEach(c => suitsCount[c.suit]++);
-    let maxSuitCount = Math.max(...Object.values(suitsCount));
-    
-    // 무늬가 4개 모여서 1장만 더 있으면 플러시가 되는 상황!
-    if (maxSuitCount === 4) {
-      // 상대가 베팅한 금액이 내 전재산의 40% 이하라면 웬만해선 안 죽고 따라감(Call)
-      if (callAmount > 0 && callAmount < bot.chips * 0.4) {
-        action = 'call';
-        foldProb = 0; // 절대 안 죽음
-      }
+  // 🌟 [순서 조정 1: 블러핑 라인] - 제일 먼저 뻥카를 칠지 말지 가볍게 결정합니다.
+  // [휴리스틱 4] 삥뜯기 (블라인드 스틸)
+  if (room.stage === 0 && room.highestBet === getBlinds(room.blindLevel).bb && action !== 'raise') {
+    if (typeof distance !== 'undefined' && (distance === activePlayers.length - 1 || distance === activePlayers.length - 2)) {
+      if (Math.random() < 0.5) { action = 'raise'; raiseAmt = getBlinds(room.blindLevel).bb * 2.5; }
     }
   }
 
-  // 🌟 [최종 진화 휴리스틱 2] 함정 파기 (Check-Raise 트랩)
-  // 내 차례에 콜 금액이 0(아무도 베팅 안함)이고, 내 패가 레벨 4(스트레이트) 이상 괴물일 때
+  // [휴리스틱 5] 기선제압 뻥카 (C-Bet)
+  if (room.stage === 1 && callAmount === 0 && action !== 'raise') {
+    if (isAggro && Math.random() < 0.4) {
+      action = 'raise'; raiseAmt = Math.floor(room.pot * 0.5 / 100) * 100; raiseAmt = Math.max(room.minRaise, raiseAmt);
+    }
+  }
+
+  // 🌟 [순서 조정 2: 패 기반 전략 라인] - 내 패 상태에 따른 전술을 짭니다.
+  // [수정된 휴리스틱 1] 내 카드에 '그 무늬'가 확실히 있을 때만 쫓아가기!
+  if (room.stage === 1 || room.stage === 2) { 
+    let suitsCount = { '♠':0, '♥':0, '♦':0, '♣':0 };
+    bot.cards.concat(room.communityCards).forEach(c => suitsCount[c.suit]++);
+    let targetSuit = Object.keys(suitsCount).find(s => suitsCount[s] === 4);
+    
+    // 💡 [버그 수정] 바닥에 깔린 4장의 무늬와 똑같은 무늬가 '내 손(bot.cards)'에 최소 1장 이상 있어야만 진짜 드로우!
+    let hasMySuit = targetSuit && (bot.cards[0].suit === targetSuit || bot.cards[1].suit === targetSuit);
+
+    if (hasMySuit && callAmount > 0 && callAmount < bot.chips * 0.4 && action !== 'raise') {
+      action = 'call'; foldProb = 0; 
+    }
+  }
+
+  // [휴리스틱 2] 함정 파기 (Check-Raise 트랩)
   if (callAmount === 0 && room.stage > 0) {
     let finalEval = evaluateHand(bot.cards, room.communityCards);
     if (finalEval.level >= 4 && action === 'raise') {
-      // 30% 확률로 레이즈 대신 얌전하게 '콜(체크)'을 해서 약한 척 연기함! (다음 턴을 노림)
-      if (Math.random() < 0.3) {
-        action = 'call';
-      }
+      if (Math.random() < 0.3) { action = 'call'; } // 레이즈를 체크로 바꿈 (함정)
     }
   }
 
-  // 🌟 [최종 진화 휴리스틱 3] 숏 스택 푸시 오어 폴드 (상남자 올인)
+  // 🌟 [순서 조정 3: 생존 및 수비 라인] - 목숨이 걸린 결정이므로 이전 로직을 다 엎어버릴 권한이 있습니다.
+  // [휴리스틱 3] 숏 스택 푸시 오어 폴드 (상남자 올인)
   let currentBB = getBlinds(room.blindLevel).bb;
-  // 내 남은 칩이 빅 블라인드의 10배 이하로 쪼들리는 상황이라면
   if (bot.chips > 0 && bot.chips <= currentBB * 10) {
-    // 찔끔찔끔 콜이나 레이즈 안 하고, 들어갈 거면 무조건 '전재산 올인'을 박음!
     if (action === 'raise' || (action === 'call' && callAmount > 0)) {
-      action = 'raise';
-      raiseAmt = bot.chips + bot.currentBet;
+      action = 'raise'; raiseAmt = bot.chips + bot.currentBet; // 찔끔 베팅을 무조건 전재산 올인으로 덮어씀!
     }
   }
 
-  // 🌟 [최종 진화 휴리스틱 4] 삥뜯기 (블라인드 스틸)
-  // 프리플랍(stage 0)에서 아무도 레이즈를 안 한 조용한 상황일 때
-  if (room.stage === 0 && room.highestBet === getBlinds(room.blindLevel).bb) {
-    // 앞서 추가했던 distance(거리) 변수를 활용하여, 내가 제일 마지막이나 그 앞 순서라면
-    if (typeof distance !== 'undefined' && (distance === activePlayers.length - 1 || distance === activePlayers.length - 2)) {
-      if (Math.random() < 0.5) { // 50% 확률로 패에 상관없이 뻥카를 칩니다!
-        action = 'raise';
-        raiseAmt = getBlinds(room.blindLevel).bb * 2.5; // 빅 블라인드의 2.5배로 기선제압
-      }
-    }
-  }
-
-  // 🌟 [최종 진화 휴리스틱 5] 기선제압 뻥카 (C-Bet)
-  // 바닥에 첫 3장이 깔린 직후(stage 1), 아무도 베팅 안 한 상황
-  if (room.stage === 1 && callAmount === 0) {
-    // 상남자(isAggro) 봇은 패가 안 맞아도 40% 확률로 일단 찔러봅니다!
-    if (isAggro && Math.random() < 0.4) {
-      action = 'raise';
-      raiseAmt = Math.floor(room.pot * 0.5 / 100) * 100; // 팟의 50% 정도를 베팅
-      raiseAmt = Math.max(room.minRaise, raiseAmt);
-    }
-  }
-
-  // 🌟 [최종 진화 휴리스틱 6] 의심병 발동 (히어로 콜)
-  // 마지막 카드까지 다 깔린 리버(stage 3)에서 누군가 강하게 베팅했을 때
-  if (room.stage === 3 && callAmount > 0) {
+  // [수비자 휴리스틱] "저 녀석 찐이다!" (극강의 베팅 인정하기)
+  if (callAmount > 0 && room.stage > 0 && action !== 'raise') { // 반격(레이즈/올인)을 안 했을 때만 쫄기
     let finalEval = evaluateHand(bot.cards, room.communityCards);
-    
-    // 내 패가 겨우 '원페어(레벨 1)'라도, 팟이 이미 내 전 재산의 2배 이상으로 크다면 호기심 발동!
-    if (finalEval.level >= 1 && room.pot >= bot.chips * 2) {
-      if (Math.random() < 0.3) { // 30% 확률로 "에라 모르겠다, 너 뻥카지?" 하고 콜
-        action = 'call';
-        foldProb = 0; // 공포심을 완전히 잃음
-        // 봇이 혼잣말을 하도록 채팅창에 로그를 띄웁니다.
-        io.to(roomCode).emit('chat_message', { type: 'log', msg: `🤔 [${bot.name}] 님이 의심스러운 눈빛으로 콜을 받습니다...` });
-      }
-    }
-  }
-  
-  // 🛡️ [수비자 전용 휴리스틱] "저 녀석 찐이다!" (극강의 베팅 인정하기)
-  // 바닥 카드가 깔린 상황(stage > 0)에서 방어해야 할 금액(callAmount)이 있을 때
-  if (callAmount > 0 && room.stage > 0) {
-    let finalEval = evaluateHand(bot.cards, room.communityCards);
-    
-    // 공격자(사람이든 다른 봇이든)가 현재 쌓인 총 팟(상금)의 80%가 넘는 거액의 폭탄 베팅을 날렸다면
-    if (callAmount >= room.pot * 0.8) {
-      
-      // 내 패가 '원페어'나 '투페어' 정도의 어중간한 패(레벨 1~2)일 때
-      if (finalEval.level >= 1 && finalEval.level <= 2) {
-        
-        // 멘탈이 나간 봇(Tilt)이나 찐 상남자 봇(isAggro)이 아니라면
-        if (bot.tiltRounds === 0 && !isAggro) {
-          // 85%의 확률로 "저건 뻥카가 아니다"라고 리스펙트(인정)하며 꼬리를 내립니다.
-          if (Math.random() < 0.85) {
-            action = 'fold';
-            // 채팅창에 봇의 쫄보 같은 심리를 출력합니다.
-            io.to(roomCode).emit('chat_message', { type: 'log', msg: `💦 [${bot.name}] 님이 상대의 거대한 베팅에 기가 눌려 패를 던집니다.` });
-          }
+    let originalPot = room.pot - callAmount; 
+    let isPainfulAmount = (callAmount >= bot.chips * 0.1) || (callAmount >= currentBB * 3);
+
+    if (callAmount >= originalPot * 0.8 && isPainfulAmount) {
+      if (finalEval.level >= 1 && finalEval.level <= 2 && bot.tiltRounds === 0 && !isAggro) {
+        if (Math.random() < 0.85) {
+          action = 'fold';
+          io.to(roomCode).emit('chat_message', { type: 'log', msg: `💦 [${bot.name}] 님이 상대의 거대한 베팅에 기가 눌려 패를 던집니다.` });
         }
+      }
+    }
+  }
+
+  // [수정된 휴리스틱 6] 의심병 발동 (부자 봇 호구화 방지)
+  if (room.stage === 3 && callAmount > 0 && action === 'fold') { 
+    let finalEval = evaluateHand(bot.cards, room.communityCards);
+    
+    // 💡 [버그 수정] 내 남은 재산 기준이 아니라, "내가 방어할 금액 대비 판돈(팟)이 3배 이상 커서 먹음직스러울 때" 의심 발동!
+    if (finalEval.level >= 1 && room.pot >= callAmount * 3) {
+      if (Math.random() < 0.3) { 
+        action = 'call'; foldProb = 0; 
+        io.to(roomCode).emit('chat_message', { type: 'log', msg: `🤔 [${bot.name}] 님이 의심스러운 눈빛으로 콜을 받습니다...` });
       }
     }
   }
