@@ -613,8 +613,8 @@
       gameData.playerOrder.forEach(id => {
         const p = gameData.players[id];
         if (!p) return; // 혹시 모를 에러 방지
-        // 뱃지를 상자 상단 한가운데(정중앙)에 예쁘게 띄웁니다!
-        const role = p.role ? `<span class="role-badge" style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); border: 1px solid #95a5a6; box-shadow: 2px 2px 5px rgba(0,0,0,0.6); font-size: 11px; z-index: 10;">${p.role}</span>` : '';
+        // 버튼을 상자 안으로 넣고, 버튼이 없는 사람도 상자 크기가 똑같도록 고정 높이(height)를 줍니다!
+        const role = `<div style="height: 22px; margin-bottom: 2px;">${p.role ? `<span class="role-badge" style="border: 1px solid #95a5a6; box-shadow: 2px 2px 5px rgba(0,0,0,0.6); font-size: 11px;">${p.role}</span>` : ''}</div>`;
         const isTurn = p.id === gameData.currentTurnId;
         
         let stateMark = '';
