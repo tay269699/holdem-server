@@ -380,22 +380,49 @@ function processBotDecision(room, roomCode, bot, io) {
   }
 
   // --- 기존 행동 결정 로직 ---
+  // --- 기존 행동 결정 로직 ---
   if (room.stage === 0) {
     let v1 = rankValues[bot.cards[0].rank]; let v2 = rankValues[bot.cards[1].rank];
     let maxV = Math.max(v1, v2); let minV = Math.min(v1, v2);
     let isPremium = (v1 === v2 && v1 >= 10) || (maxV >= 13 && minV >= 11); 
+    
+    // 👇 [신규 추가] 현재 빅 블라인드(BB) 금액 확인 (스탠다드 레이즈 계산용)
+    let bbAmt = BLIND_STRUCTURE[room.blindLevel] ? BLIND_STRUCTURE[room.blindLevel].bb : 200;
+
     if (callAmount > 0) {
-      if (isPremium) { action = rand < 0.6 ? 'raise' : 'call'; raiseAmt = room.highestBet + getDynamicRaise(); } 
-      // 👇 방금 적용된 공포(foldProb 증가)가 여기서 확률로 계산되어 적용됨!
-      else if (v1 === v2 || maxV >= 10) { action = 'call'; if (callAmount >= bot.chips * (0.4 / foldProb) && rand < (0.8 * foldProb)) action = 'fold'; } 
-      else { action = rand < (0.05 * bluffProb) ? 'raise' : 'fold'; raiseAmt = room.highestBet + room.minRaise; }
-    } else {
-      if (isPremium) { action = 'raise'; raiseAmt = getDynamicRaise(); } 
-      else if (v1 === v2 || maxV >= 10) { action = rand < 0.4 ? 'raise' : 'call'; raiseAmt = getDynamicRaise() * 0.5; } 
-      else { action = rand < (0.1 * bluffProb) ? 'raise' : 'call'; raiseAmt = room.minRaise; }
+      if (isPremium) { 
+        action = rand < 0.8 ? 'raise' : 'call'; 
+        // 🌟 수정 1: 프리플랍 괴물 패는 기존 팟 비례가 아니라 BB의 3~5배로 세게 때림!
+        let bbMultiplier = 2 + Math.floor(Math.random() * 3); // 2, 3, 4배 추가
+        raiseAmt = room.highestBet + (bbAmt * bbMultiplier); 
+      } 
+      else if (v1 === v2 || maxV >= 10) { 
+        // 🌟 수정 2: 아무도 레이즈 안 한 상태(highestBet == bbAmt)면 묻어가지 않고 40% 확률로 오픈 레이즈 시도!
+        if (room.highestBet === bbAmt && rand < (0.4 * raiseAggressiveness * 2)) {
+          action = 'raise';
+          raiseAmt = room.highestBet + (bbAmt * 2); // 기본 3BB 레이즈
+        } else {
+          action = 'call'; 
+          if (callAmount >= bot.chips * (0.3 / foldProb) && rand < (0.8 * foldProb)) action = 'fold'; 
+        }
+      } 
+      else { 
+        action = rand < (0.05 * bluffProb) ? 'raise' : 'fold'; 
+        raiseAmt = room.highestBet + (bbAmt * 2); 
+      }
+    } else { // 자신이 BB(빅블라인드) 위치이거나 앞서 모두 폴드했을 때
+      if (isPremium) { action = 'raise'; raiseAmt = bbAmt * (3 + Math.floor(Math.random() * 3)); } 
+      else if (v1 === v2 || maxV >= 10) { action = rand < 0.5 ? 'raise' : 'call'; raiseAmt = bbAmt * 3; } 
+      else { action = rand < (0.1 * bluffProb) ? 'raise' : 'call'; raiseAmt = bbAmt * 2; }
     }
+    
+    // 레이즈 금액을 100 단위로 깔끔하게 절사
+    raiseAmt = Math.floor(raiseAmt / 100) * 100;
+    
   } else { 
+    // [플랍 이후 로직은 기존과 완전히 동일하게 유지]
     let evalResult = evaluateHand(bot.cards, room.communityCards);
+// ... 생략 (이후 코드는 건드리지 않음) ...
     if (evalResult.level >= 3) { action = 'raise'; raiseAmt = getDynamicRaise(); } 
     else if (evalResult.level >= 1) { 
       if (callAmount === 0) { action = rand < 0.6 ? 'raise' : 'call'; raiseAmt = getDynamicRaise() * 0.5; } 
