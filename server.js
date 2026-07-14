@@ -314,137 +314,152 @@ function processBotDecision(room, roomCode, bot, io) {
 
   const callAmount = room.highestBet - bot.currentBet;
   let action = 'fold'; let raiseAmt = 0;
-  let rand = Math.random(); // 0~1 사이의 난수
+  let rand = Math.random(); 
 
-  // 🌟 [신규 추가 1] 봇 이름(형용사)에 따른 '성격' 부여하기
-  // 기본값 설정 (보통 성격)
-  let bluffProb = 1.0; // 뻥카 확률 배수
-  let foldProb = 1.0;  // 포기(폴드) 확률 배수
-  let raiseAggressiveness = 0.5; // 베팅 성향 (팟의 몇 %를 기본으로 칠 것인가)
+  let bluffProb = 1.0; 
+  let foldProb = 1.0;  
+  let raiseAggressiveness = 0.5; 
 
-  // 상남자(공격적) 성향의 단어들
   const aggroKeywords = ['올인하는', '뻥카치는', '대담한', '건방진', '화난', '성급한', '허세부리는', '무서운'];
-  // 쫄보(방어적) 성향의 단어들
   const tightKeywords = ['소심한', '눈치보는', '쫄보인', '신중한', '계산적인', '수줍은', '예민한', '초조한'];
 
-  if (aggroKeywords.some(kw => bot.name.includes(kw))) {
-    bluffProb = 2.5; // 뻥카 칠 확률 2.5배 떡상!
-    foldProb = 0.5;  // 웬만해선 안 죽음 (폴드 확률 절반으로 감소)
-    raiseAggressiveness = 0.8; // 레이즈를 할 때 기본적으로 팟의 80%를 때려버림
-  } else if (tightKeywords.some(kw => bot.name.includes(kw))) {
-    bluffProb = 0.2; // 뻥카 거의 안 침 (너무 무서움)
-    foldProb = 1.5;  // 남이 치고 나오면 빨리 도망감
-    raiseAggressiveness = 0.3; // 레이즈를 해도 판돈의 30%만 소심하게 침
+  let isAggro = aggroKeywords.some(kw => bot.name.includes(kw));
+  let isTight = tightKeywords.some(kw => bot.name.includes(kw));
+
+  // 1. [멘탈 붕괴 시스템]
+  if (room.stage === 0 && bot.recentlyLostBig) {
+    bot.recentlyLostBig = false; 
+    let tiltChance = isAggro ? 0.6 : (isTight ? 0.15 : 0.3);
+    if (Math.random() < tiltChance) {
+      bot.tiltRounds = isAggro ? 4 : (isTight ? 2 : 3);
+      io.to(roomCode).emit('chat_message', { type: 'log', msg: `💢 [${bot.name}] 님이 방금 판의 충격으로 평정심을 잃은 것 같습니다...` });
+    }
+  }
+
+  if (isAggro) { bluffProb = 2.5; foldProb = 0.5; raiseAggressiveness = 0.8; } 
+  else if (isTight) { bluffProb = 0.2; foldProb = 1.5; raiseAggressiveness = 0.3; }
+
+  if (bot.tiltRounds > 0) {
+     let tiltIntensity = isAggro ? 2.0 : (isTight ? 1.2 : 1.5);
+     bluffProb *= tiltIntensity; foldProb /= tiltIntensity; raiseAggressiveness *= tiltIntensity;
+     if (foldProb < 0.2) foldProb = 0.2; 
   }
   
-  // 🌟 [신규 추가 3] 매몰 비용(Sunk Cost) 및 팟 오즈(Pot Odds) 인지 로직 탑재!
+  // 🌟 2. [신규: 공포 시스템] 상대적 빈곤감 인지
+  let otherMaxChips = 0;
+  room.playerOrder.forEach(id => {
+    let p = room.players[id];
+    if (p.id !== bot.id && p.state === 'playing' && p.chips > otherMaxChips) {
+      otherMaxChips = p.chips;
+    }
+  });
+
+  // 나보다 2배 이상 돈이 많은 압도적 부자가 있고, 내 전 재산의 15% 이상을 베팅해야 한다면 '공포'를 느낌
+  let amIFacingBully = (otherMaxChips >= bot.chips * 2) && (callAmount >= bot.chips * 0.15);
   
-  // 1. 팟 오즈(가성비): 내야 할 돈 대비 먹을 수 있는 총 상금의 비율 (낮을수록 가성비가 좋음)
+  if (amIFacingBully) {
+    // 쫄보는 2배 더 잘 도망가고, 상남자는 자존심 때문에 전혀 안 쫄고(1.0), 일반 봇은 1.3배 더 잘 도망감
+    let fearFactor = isTight ? 2.0 : (isAggro ? 1.0 : 1.3);
+    foldProb *= fearFactor; 
+  }
+
+  // 3. [매몰 비용 & 팟 오즈]
   let potOdds = callAmount > 0 ? callAmount / (room.pot + callAmount) : 0;
-  
-  // 2. 투자 비율: 내 초기 자본(현재 칩 + 이미 베팅한 돈) 대비 이미 판에 밀어넣은 돈의 비율
   let totalWealth = bot.chips + bot.invested;
   let investmentRatio = totalWealth > 0 ? bot.invested / totalWealth : 0;
-
-  // 3. 팟 커밋 상태 판별: 이미 내 전 재산의 50% 이상을 넣었다면 "아까워서라도 끝까지 간다!"
   let isCommitted = investmentRatio >= 0.5;
 
-  if (isCommitted) {
-    foldProb *= 0.1; // 이미 돈을 많이 썼다면 포기(폴드)할 확률을 1/10로 대폭 줄임
-  } else if (potOdds > 0 && potOdds < 0.2) {
-    foldProb *= 0.5; // 먹을 상금이 낼 돈에 비해 엄청 크다면(가성비 갑) 포기 확률 절반으로 줄임
-  }
+  if (isCommitted) { foldProb *= 0.1; } 
+  else if (potOdds > 0 && potOdds < 0.2) { foldProb *= 0.5; }
 
-  // 🌟 [신규 추가 2] '판돈(Pot)' 기반 레이즈 계산 함수 (사람 냄새 나는 노이즈 추가)
   function getDynamicRaise() {
     let potSize = room.pot;
-    // 내가 콜 받아야 할 돈 + (현재 판돈 * 내 성향) 에다가 
-    // 0.8 ~ 1.2 사이의 랜덤 노이즈를 곱해서 매번 금액이 삐뚤빼뚤하게 만듦
     let baseRaise = callAmount + (potSize * raiseAggressiveness * (0.8 + Math.random() * 0.4));
-    
-    // 칩 끝자리를 100단위로 예쁘게 맞춰줌 (예: 2137칩 -> 2100칩)
     let finalRaise = Math.floor(baseRaise / 100) * 100;
-    
-    // 혹시라도 서버 최소 레이즈 금액보다 적으면 최소 금액으로 보정
     return Math.max(room.minRaise, finalRaise);
   }
 
+  // --- 기존 행동 결정 로직 ---
   if (room.stage === 0) {
-    // [1] 프리플랍 (시작 카드 2장)
-    let v1 = rankValues[bot.cards[0].rank];
-    let v2 = rankValues[bot.cards[1].rank];
-    let maxV = Math.max(v1, v2);
-    let minV = Math.min(v1, v2);
-
+    let v1 = rankValues[bot.cards[0].rank]; let v2 = rankValues[bot.cards[1].rank];
+    let maxV = Math.max(v1, v2); let minV = Math.min(v1, v2);
     let isPremium = (v1 === v2 && v1 >= 10) || (maxV >= 13 && minV >= 11); 
-
     if (callAmount > 0) {
-      if (isPremium) {
-        action = rand < 0.6 ? 'raise' : 'call'; 
-        raiseAmt = room.highestBet + getDynamicRaise(); // 고정값 대신 유동적 금액
-      } else if (v1 === v2 || maxV >= 10) {
-        action = 'call';
-        // 쫄보 봇은 상대 베팅이 내 칩의 20%만 돼도 도망갈 수 있음 (foldProb 적용)
-        if (callAmount >= bot.chips * (0.4 / foldProb) && rand < (0.8 * foldProb)) action = 'fold';
-      } else {
-        // 상남자 봇은 뻥카 확률이 높음 (bluffProb 적용)
-        action = rand < (0.05 * bluffProb) ? 'raise' : 'fold'; 
-        raiseAmt = room.highestBet + room.minRaise; // 뻥카는 가볍게
-      }
+      if (isPremium) { action = rand < 0.6 ? 'raise' : 'call'; raiseAmt = room.highestBet + getDynamicRaise(); } 
+      // 👇 방금 적용된 공포(foldProb 증가)가 여기서 확률로 계산되어 적용됨!
+      else if (v1 === v2 || maxV >= 10) { action = 'call'; if (callAmount >= bot.chips * (0.4 / foldProb) && rand < (0.8 * foldProb)) action = 'fold'; } 
+      else { action = rand < (0.05 * bluffProb) ? 'raise' : 'fold'; raiseAmt = room.highestBet + room.minRaise; }
     } else {
-      if (isPremium) {
-        action = 'raise';
-        raiseAmt = getDynamicRaise(); 
-      } else if (v1 === v2 || maxV >= 10) {
-        action = rand < 0.4 ? 'raise' : 'call'; 
-        raiseAmt = getDynamicRaise() * 0.5; // 약한 오픈 레이즈
-      } else {
-        action = rand < (0.1 * bluffProb) ? 'raise' : 'call'; 
-        raiseAmt = room.minRaise;
-      }
+      if (isPremium) { action = 'raise'; raiseAmt = getDynamicRaise(); } 
+      else if (v1 === v2 || maxV >= 10) { action = rand < 0.4 ? 'raise' : 'call'; raiseAmt = getDynamicRaise() * 0.5; } 
+      else { action = rand < (0.1 * bluffProb) ? 'raise' : 'call'; raiseAmt = room.minRaise; }
     }
   } else { 
-    // [2] 플랍 이후 (바닥 카드가 깔린 상태)
     let evalResult = evaluateHand(bot.cards, room.communityCards);
-
-    if (evalResult.level >= 3) { // 트리플 이상 (괴물 패)
-      action = 'raise';
-      raiseAmt = getDynamicRaise(); 
-    } 
-    else if (evalResult.level >= 1) { // 원페어/투페어
-      if (callAmount === 0) {
-        action = rand < 0.6 ? 'raise' : 'call'; 
-        raiseAmt = getDynamicRaise() * 0.5;
-      } else {
+    if (evalResult.level >= 3) { action = 'raise'; raiseAmt = getDynamicRaise(); } 
+    else if (evalResult.level >= 1) { 
+      if (callAmount === 0) { action = rand < 0.6 ? 'raise' : 'call'; raiseAmt = getDynamicRaise() * 0.5; } 
+      else {
+        // 👇 플랍 이후에도 공포가 적용됨!
         if (callAmount <= bot.chips * 0.5) action = rand < 0.2 ? 'raise' : 'call'; 
         else action = rand < (0.7 * foldProb) ? 'fold' : 'call'; 
       }
-    } 
-    else { // 하이카드 (안 맞음)
-      if (callAmount === 0) {
-         action = rand < (0.2 * bluffProb) ? 'raise' : 'call'; 
-         raiseAmt = getDynamicRaise() * 0.5;
-      } else {
-         action = rand < (0.1 * bluffProb) ? 'raise' : 'fold'; 
-         raiseAmt = getDynamicRaise();
+    } else { 
+      if (callAmount === 0) { action = rand < (0.2 * bluffProb) ? 'raise' : 'call'; raiseAmt = getDynamicRaise() * 0.5; } 
+      else { action = rand < (0.1 * bluffProb) ? 'raise' : 'fold'; raiseAmt = getDynamicRaise(); }
+    }
+  }
+
+  // 4. [빅 스택 불리 시스템] 
+  let isBully = (otherMaxChips > 0) && (bot.chips >= otherMaxChips * 2);
+  let isDecentHand = false;
+  if (room.stage === 0) {
+    let maxV = Math.max(rankValues[bot.cards[0].rank], rankValues[bot.cards[1].rank]);
+    isDecentHand = (bot.cards[0].rank === bot.cards[1].rank) || (maxV >= 11);
+  } else {
+    let evalResult = evaluateHand(bot.cards, room.communityCards);
+    isDecentHand = evalResult.level >= 1; 
+  }
+
+  // 60% 확률로 상대를 찍어누름 (무조건 발동 아님!)
+  if (isBully && isDecentHand && action === 'call') {
+    if (Math.random() < 0.6) {
+      action = 'raise';
+      raiseAmt = getDynamicRaise() * 1.5; 
+    }
+  }
+
+  // 🤑 [신규 추가: 밸류 베팅 & 핸드 프로텍션 (강한 패 뻥튀기)]
+  if (room.stage > 0 && action === 'raise') {
+    let finalEval = evaluateHand(bot.cards, room.communityCards);
+    
+    // 1티어: 진짜 괴물 패 (플러시~스트레이트 플러시, 레벨 5 이상)
+    // -> 80%의 높은 확률로 자비 없이 레이즈 금액을 1.5배~2배 뻥튀기
+    if (finalEval.level >= 5) {
+      if (Math.random() < 0.8) {
+        let greedyMultiplier = 1.5 + (Math.random() * 0.5);
+        raiseAmt = Math.floor(raiseAmt * greedyMultiplier / 100) * 100;
+      }
+    }
+    // 2티어: 적당히 강하고 거친 패 (투페어~스트레이트, 레벨 2~4)
+    // -> 상대가 못 따라오게 압박하는 핸드 프로텍션 베팅!
+    else if (finalEval.level >= 2 && finalEval.level <= 4) {
+      // 상남자(isAggro) 봇이거나 멘붕(tiltRounds > 0) 상태면 60% 확률로 거칠게 나옴. 쫄보는 20% 확률.
+      let pressureChance = (isAggro || bot.tiltRounds > 0) ? 0.6 : (isTight ? 0.2 : 0.35);
+      
+      if (Math.random() < pressureChance) {
+        let pressureMultiplier = 1.2 + (Math.random() * 0.4); // 1.2배 ~ 1.6배 압박
+        raiseAmt = Math.floor(raiseAmt * pressureMultiplier / 100) * 100;
       }
     }
   }
 
-  // [공통 보정 1] 올인 및 최소 금액 규칙 준수
+  // --- 기존의 보정 로직 ---
   if (action === 'raise' && raiseAmt >= bot.chips) { raiseAmt = bot.chips + bot.currentBet; }
-  if (action === 'raise' && raiseAmt < room.minRaise) { raiseAmt = room.minRaise; } // 무조건 최소 레이즈 보장
+  if (action === 'raise' && raiseAmt < room.minRaise) { raiseAmt = room.minRaise; } 
   if (action === 'fold' && callAmount === 0) { action = 'call'; } 
-
-  // 👇 [보안 패치 유지] 숏 올인 맞은 봇 데드락 방지
-  if (action === 'raise' && bot.acted) { 
-    action = 'call'; 
-  }
-
-  // 🌟 [최종 보정] 아까워서 못 죽는 상태(팟 커밋)인데 주사위 굴려서 어쩌다 폴드가 나왔다면? 강제로 콜로 바꿔줌!
-  if (action === 'fold' && isCommitted) { 
-    action = 'call'; 
-  }
+  if (action === 'raise' && bot.acted) { action = 'call'; } 
+  if (action === 'fold' && isCommitted) { action = 'call'; } 
 
   handleAction(room, roomCode, bot, { action, amount: raiseAmt }, io);
 }
@@ -761,13 +776,26 @@ io.on('connection', (socket) => {
       }
 
       Object.values(room.players).forEach(p => {
+        // 💢 1. 리바이(충전)를 하기 전에, 진짜 남은 돈을 기준으로 멘붕 여부를 먼저 판독!
+        if (p.isBot) {
+          if (p.lastRoundChips && (p.lastRoundChips - p.chips) >= (p.lastRoundChips * 0.3)) {
+            p.recentlyLostBig = true;
+          }
+          if (p.tiltRounds > 0) p.tiltRounds--; 
+        }
+
+        // 💸 2. 멘탈 판독이 끝났으니, 안심하고 칩을 충전해 줍니다.
         if (p.pendingRebuy) {
           p.chips += (10000 * p.pendingRebuy);
           p.rebuyCount += p.pendingRebuy;
           p.pendingRebuy = 0;
         }
-        // 👇 = 기호를 += 기호로 바꾸어 남은 칩에 더해지도록 수정했습니다.
         if (p.isBot && p.chips < 200) { p.chips += 10000; p.rebuyCount++; }
+
+        // 💾 3. 충전이 모두 끝난 '최종 칩' 금액을 다음 판 비교를 위해 저장해 둡니다.
+        if (p.isBot) {
+          p.lastRoundChips = p.chips; 
+        }
       });
 
       const currBlinds = BLIND_STRUCTURE[room.blindLevel] || BLIND_STRUCTURE[BLIND_STRUCTURE.length - 1];
