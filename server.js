@@ -523,6 +523,45 @@ function processBotDecision(room, roomCode, bot, io) {
     }
   }
 
+  // 🌟 [최종 진화 휴리스틱 1] 드로우(뽀대) 쫓아가기 (플러시 드로우 인지)
+  if (room.stage === 1 || room.stage === 2) { // 플랍이나 턴일 때만
+    let suitsCount = { '♠':0, '♥':0, '♦':0, '♣':0 };
+    bot.cards.concat(room.communityCards).forEach(c => suitsCount[c.suit]++);
+    let maxSuitCount = Math.max(...Object.values(suitsCount));
+    
+    // 무늬가 4개 모여서 1장만 더 있으면 플러시가 되는 상황!
+    if (maxSuitCount === 4) {
+      // 상대가 베팅한 금액이 내 전재산의 40% 이하라면 웬만해선 안 죽고 따라감(Call)
+      if (callAmount > 0 && callAmount < bot.chips * 0.4) {
+        action = 'call';
+        foldProb = 0; // 절대 안 죽음
+      }
+    }
+  }
+
+  // 🌟 [최종 진화 휴리스틱 2] 함정 파기 (Check-Raise 트랩)
+  // 내 차례에 콜 금액이 0(아무도 베팅 안함)이고, 내 패가 레벨 4(스트레이트) 이상 괴물일 때
+  if (callAmount === 0 && room.stage > 0) {
+    let finalEval = evaluateHand(bot.cards, room.communityCards);
+    if (finalEval.level >= 4 && action === 'raise') {
+      // 30% 확률로 레이즈 대신 얌전하게 '콜(체크)'을 해서 약한 척 연기함! (다음 턴을 노림)
+      if (Math.random() < 0.3) {
+        action = 'call';
+      }
+    }
+  }
+
+  // 🌟 [최종 진화 휴리스틱 3] 숏 스택 푸시 오어 폴드 (상남자 올인)
+  let currentBB = getBlinds(room.blindLevel).bb;
+  // 내 남은 칩이 빅 블라인드의 10배 이하로 쪼들리는 상황이라면
+  if (bot.chips > 0 && bot.chips <= currentBB * 10) {
+    // 찔끔찔끔 콜이나 레이즈 안 하고, 들어갈 거면 무조건 '전재산 올인'을 박음!
+    if (action === 'raise' || (action === 'call' && callAmount > 0)) {
+      action = 'raise';
+      raiseAmt = bot.chips + bot.currentBet;
+    }
+  }
+
   // --- 기존의 보정 로직 ---
   if (action === 'raise' && raiseAmt >= bot.chips) { raiseAmt = bot.chips + bot.currentBet; }
   if (action === 'raise' && raiseAmt < room.minRaise) { raiseAmt = room.minRaise; } 
