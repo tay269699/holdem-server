@@ -562,6 +562,69 @@ function processBotDecision(room, roomCode, bot, io) {
     }
   }
 
+  // 🌟 [최종 진화 휴리스틱 4] 삥뜯기 (블라인드 스틸)
+  // 프리플랍(stage 0)에서 아무도 레이즈를 안 한 조용한 상황일 때
+  if (room.stage === 0 && room.highestBet === getBlinds(room.blindLevel).bb) {
+    // 앞서 추가했던 distance(거리) 변수를 활용하여, 내가 제일 마지막이나 그 앞 순서라면
+    if (typeof distance !== 'undefined' && (distance === activePlayers.length - 1 || distance === activePlayers.length - 2)) {
+      if (Math.random() < 0.5) { // 50% 확률로 패에 상관없이 뻥카를 칩니다!
+        action = 'raise';
+        raiseAmt = getBlinds(room.blindLevel).bb * 2.5; // 빅 블라인드의 2.5배로 기선제압
+      }
+    }
+  }
+
+  // 🌟 [최종 진화 휴리스틱 5] 기선제압 뻥카 (C-Bet)
+  // 바닥에 첫 3장이 깔린 직후(stage 1), 아무도 베팅 안 한 상황
+  if (room.stage === 1 && callAmount === 0) {
+    // 상남자(isAggro) 봇은 패가 안 맞아도 40% 확률로 일단 찔러봅니다!
+    if (isAggro && Math.random() < 0.4) {
+      action = 'raise';
+      raiseAmt = Math.floor(room.pot * 0.5 / 100) * 100; // 팟의 50% 정도를 베팅
+      raiseAmt = Math.max(room.minRaise, raiseAmt);
+    }
+  }
+
+  // 🌟 [최종 진화 휴리스틱 6] 의심병 발동 (히어로 콜)
+  // 마지막 카드까지 다 깔린 리버(stage 3)에서 누군가 강하게 베팅했을 때
+  if (room.stage === 3 && callAmount > 0) {
+    let finalEval = evaluateHand(bot.cards, room.communityCards);
+    
+    // 내 패가 겨우 '원페어(레벨 1)'라도, 팟이 이미 내 전 재산의 2배 이상으로 크다면 호기심 발동!
+    if (finalEval.level >= 1 && room.pot >= bot.chips * 2) {
+      if (Math.random() < 0.3) { // 30% 확률로 "에라 모르겠다, 너 뻥카지?" 하고 콜
+        action = 'call';
+        foldProb = 0; // 공포심을 완전히 잃음
+        // 봇이 혼잣말을 하도록 채팅창에 로그를 띄웁니다.
+        io.to(roomCode).emit('chat_message', { type: 'log', msg: `🤔 [${bot.name}] 님이 의심스러운 눈빛으로 콜을 받습니다...` });
+      }
+    }
+  }
+  
+  // 🛡️ [수비자 전용 휴리스틱] "저 녀석 찐이다!" (극강의 베팅 인정하기)
+  // 바닥 카드가 깔린 상황(stage > 0)에서 방어해야 할 금액(callAmount)이 있을 때
+  if (callAmount > 0 && room.stage > 0) {
+    let finalEval = evaluateHand(bot.cards, room.communityCards);
+    
+    // 공격자(사람이든 다른 봇이든)가 현재 쌓인 총 팟(상금)의 80%가 넘는 거액의 폭탄 베팅을 날렸다면
+    if (callAmount >= room.pot * 0.8) {
+      
+      // 내 패가 '원페어'나 '투페어' 정도의 어중간한 패(레벨 1~2)일 때
+      if (finalEval.level >= 1 && finalEval.level <= 2) {
+        
+        // 멘탈이 나간 봇(Tilt)이나 찐 상남자 봇(isAggro)이 아니라면
+        if (bot.tiltRounds === 0 && !isAggro) {
+          // 85%의 확률로 "저건 뻥카가 아니다"라고 리스펙트(인정)하며 꼬리를 내립니다.
+          if (Math.random() < 0.85) {
+            action = 'fold';
+            // 채팅창에 봇의 쫄보 같은 심리를 출력합니다.
+            io.to(roomCode).emit('chat_message', { type: 'log', msg: `💦 [${bot.name}] 님이 상대의 거대한 베팅에 기가 눌려 패를 던집니다.` });
+          }
+        }
+      }
+    }
+  }
+
   // --- 기존의 보정 로직 ---
   if (action === 'raise' && raiseAmt >= bot.chips) { raiseAmt = bot.chips + bot.currentBet; }
   if (action === 'raise' && raiseAmt < room.minRaise) { raiseAmt = room.minRaise; } 
