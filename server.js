@@ -544,7 +544,12 @@ function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
     room.turnTimer = setTimeout(() => {
           if (rooms[roomCode] === room && room.currentTurnId === expectedTurnId) {
             let p = room.players[expectedTurnId];
-            if (!p) { room.currentTurnId = null; return; } // 🛡️ 유저가 없으면 에러 방지
+            if (!p) { 
+              room.currentTurnId = null; 
+              findNextTurn(room, room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline), false, roomCode, io);
+              broadcastGameState(io, roomCode, room);
+              return; 
+            }
             
             let callAmount = Math.max(0, (room.highestBet || 0) - (p.currentBet || 0)); // 🛡️ 금액 오류(음수) 방지
             
@@ -605,8 +610,8 @@ function broadcastGameState(io, roomCode, room) {
 io.on('connection', (socket) => {
   
   socket.on('join_room', (data) => {
-    const roomCode = data.roomCode;
-    const playerName = data.playerName;
+    const roomCode = String(data.roomCode).substring(0, 20);
+    const playerName = String(data.playerName).substring(0, 15);
 
     // 👇 이 3줄을 추가하세요. 방이 30개 이상 만들어지는 것을 막아 무료 서버 다운을 방지합니다.
     if (Object.keys(rooms).length >= 30 && !rooms[roomCode]) {
@@ -771,7 +776,7 @@ io.on('connection', (socket) => {
       const pName = room.players[socket.id].name;
       
       // [서버 2중 보안] 해킹용 특수 기호를 안전한 문자로 강제 변환합니다.
-      const safeMsg = typeof msg === 'string' ? msg.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
+      const safeMsg = typeof msg === 'string' ? msg.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;") : "";
       
       io.to(socket.roomCode).emit('chat_message', { type: 'chat', name: pName, msg: safeMsg });
     }
@@ -925,7 +930,12 @@ io.on('connection', (socket) => {
         room.turnTimer = setTimeout(() => {
           if (rooms[socket.roomCode] === room && room.currentTurnId === expectedTurnId) {
             let p = room.players[expectedTurnId];
-            if (!p) { room.currentTurnId = null; return; } // 🛡️ 유저가 없으면 에러 방지
+            if (!p) { 
+              room.currentTurnId = null; 
+              findNextTurn(room, room.playerOrder.filter(id => room.players[id].state === 'playing' && !room.players[id].isOffline), false, socket.roomCode, io);
+              broadcastGameState(io, socket.roomCode, room);
+              return; 
+            }
 
             let callAmount = Math.max(0, (room.highestBet || 0) - (p.currentBet || 0)); // 🛡️ 금액 오류(음수) 방지
             let timeoutAction = callAmount === 0 ? 'call' : 'fold';
