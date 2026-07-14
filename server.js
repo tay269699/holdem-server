@@ -392,8 +392,8 @@ function processBotDecision(room, roomCode, bot, io) {
     let maxV = Math.max(v1, v2); let minV = Math.min(v1, v2);
     let isPremium = (v1 === v2 && v1 >= 10) || (maxV >= 13 && minV >= 11); 
     
-    // 👇 [신규 추가] 현재 빅 블라인드(BB) 금액 확인 (스탠다드 레이즈 계산용)
-    let bbAmt = BLIND_STRUCTURE[room.blindLevel] ? BLIND_STRUCTURE[room.blindLevel].bb : 200;
+    // 🌟 삭제된 배열 대신, 새롭게 만든 getBlinds() 함수에서 빅 블라인드 값을 가져옵니다!
+    let bbAmt = getBlinds(room.blindLevel).bb;
 
     if (callAmount > 0) {
       if (isPremium) { 
