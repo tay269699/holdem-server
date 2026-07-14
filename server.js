@@ -13,11 +13,16 @@ const io = require('socket.io')(http, {
 
 let rooms = {};
 
-const BLIND_STRUCTURE = [
-  { sb: 100, bb: 200 }, { sb: 200, bb: 400 }, { sb: 300, bb: 600 },
-  { sb: 500, bb: 1000 }, { sb: 1000, bb: 2000 }, { sb: 2000, bb: 4000 }
-];
+// 기존 배열(BLIND_STRUCTURE)을 삭제하고 아래 코드로 바꿉니다.
 const BLIND_DURATION = 5 * 60 * 1000; 
+
+// 🌟 무한 2배수 계산 함수 (level 0이면 100/200, level 1이면 200/400 ... 무한대)
+function getBlinds(level) {
+  return { 
+    sb: 100 * Math.pow(2, level), 
+    bb: 200 * Math.pow(2, level) 
+  };
+} 
 
 const rankValues = { '2':2, '3':3, '4':4, '5':5, '6':6, '7':7, '8':8, '9':9, '10':10, 'J':11, 'Q':12, 'K':13, 'A':14 };
 
@@ -285,7 +290,8 @@ function handleAction(room, roomCode, player, data, io) {
       // 👇 1초(1000ms) 딜레이를 줍니다.
       setTimeout(() => {
         room.stage++; room.highestBet = 0; 
-        const currBB = (BLIND_STRUCTURE[room.blindLevel] || BLIND_STRUCTURE[BLIND_STRUCTURE.length - 1]).bb;
+        // 🌟 상한선 없이 함수에서 현재 레벨의 빅 블라인드 값을 바로 가져옴
+        const currBB = getBlinds(room.blindLevel).bb;
         room.lastRaiseAmount = currBB; room.minRaise = currBB; 
         activePlayers.forEach(id => { room.players[id].currentBet = 0; if (room.players[id].chips > 0) room.players[id].acted = false; });
         
@@ -557,10 +563,17 @@ function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
 }
 
 function getGameState(room) {
+  // 🌟 화면단(UI) 코드를 건드리지 않기 위해, 현재 레벨과 다음 레벨 정보만 담은 가짜 배열을 실시간으로 생성
+  let infiniteBlinds = [];
+  for (let i = 0; i <= room.blindLevel + 1; i++) {
+    infiniteBlinds.push(getBlinds(i));
+  }
+
   return {
     players: room.players, playerOrder: room.playerOrder, pot: room.pot, currentTurnId: room.currentTurnId, highestBet: room.highestBet, 
     minRaise: room.minRaise, communityCards: room.communityCards, stage: room.stage, 
-    blindLevel: room.blindLevel, blindEndTime: room.blindEndTime, blinds: BLIND_STRUCTURE,
+    blindLevel: room.blindLevel, blindEndTime: room.blindEndTime, 
+    blinds: infiniteBlinds, // 👈 생성한 가짜 배열을 넣어줌
     uncontestedWinner: room.uncontestedWinner, turnStartTime: room.turnStartTime
   };
 }
@@ -799,7 +812,9 @@ io.on('connection', (socket) => {
       
       if (!room.blindEndTime) { room.blindLevel = 0; room.blindEndTime = Date.now() + BLIND_DURATION; } 
       else if (Date.now() > room.blindEndTime) {
-        room.blindLevel = Math.min(room.blindLevel + 1, BLIND_STRUCTURE.length - 1); room.blindEndTime = Date.now() + BLIND_DURATION;
+        // 🌟 Math.min(상한선)을 삭제하여 시간이 지나면 무한정 레벨이 오르도록 만듦!
+        room.blindLevel += 1; 
+        room.blindEndTime = Date.now() + BLIND_DURATION;
       }
 
       Object.values(room.players).forEach(p => {
@@ -825,7 +840,7 @@ io.on('connection', (socket) => {
         }
       });
 
-      const currBlinds = BLIND_STRUCTURE[room.blindLevel] || BLIND_STRUCTURE[BLIND_STRUCTURE.length - 1];
+      const currBlinds = getBlinds(room.blindLevel);
       const activeIds = room.playerOrder.filter(id => room.players[id].chips > 0 && !room.players[id].isOffline);
       if (activeIds.length < 2) return socket.emit('system_message', '칩을 가진 유저(또는 봇)가 최소 2명 필요합니다.');
 
