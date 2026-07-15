@@ -206,6 +206,9 @@ function processAllInShowdown(io, roomCode) {
 function handleAction(room, roomCode, player, data, io) {
   // 👇 [보안 패치] stage === 5 (결과창) 조건을 추가하여 무한 칩 복사 해킹과 타이머 꼬임을 완벽히 차단합니다.
   if(!room || room.status !== 'playing' || room.stage === 5 || !player || room.currentTurnId !== player.id || !data) return; 
+
+  // 👇 [추가된 방어막] 허용된 3가지 행동(call, fold, raise)이 아니면 즉시 함수를 종료하여 턴 고장을 막습니다.
+  if (!['call', 'fold', 'raise'].includes(data.action)) return;
   
   // 유저가 버튼을 눌러 액션을 취하면 째깍거리던 타이머를 즉시 정지시킵니다
   if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
@@ -236,12 +239,25 @@ function handleAction(room, roomCode, player, data, io) {
     io.to(roomCode).emit('play_sound', 'fold');
   } else if (data.action === 'raise') {
 
-    let raiseAmount = parseInt(data.amount);
     let maxPossibleBet = player.currentBet + player.chips;
     
-    // 👇 이 부분이 변경되었습니다! (음수 값이 들어오면 강제로 최소 베팅금으로 바꿔버림)
-    if (isNaN(raiseAmount) || raiseAmount <= 0) raiseAmount = room.minRaise; 
-    if (raiseAmount < room.minRaise && raiseAmount !== maxPossibleBet) { raiseAmount = room.minRaise; }
+    // 👇 [보안 패치] parseInt 대신 Number를 사용하여 소수점을 걸러내고, isInteger로 완벽한 정수인지 1차 검사
+    let raiseAmount = Number(data.amount);
+    
+    // 1. 숫자가 아니거나, 소수점이거나, 0 이하이거나, 브라우저가 버티지 못할 초대형 숫자면 무효화
+    if (!Number.isInteger(raiseAmount) || raiseAmount <= 0 || raiseAmount > Number.MAX_SAFE_INTEGER) {
+      raiseAmount = room.minRaise; 
+    }
+    
+    // 2. 해킹으로 본인 전 재산보다 더 큰 숫자를 보냈다면, 남은 칩만큼만 걸게끔(올인) 강제 하향 조정
+    if (raiseAmount > maxPossibleBet) {
+      raiseAmount = maxPossibleBet;
+    }
+
+    // 3. 최소 베팅 금액보다 적게 걸려고 하면 무효화 (자신의 전 재산을 올인하는 경우는 예외 통과)
+    if (raiseAmount < room.minRaise && raiseAmount !== maxPossibleBet) { 
+      raiseAmount = room.minRaise; 
+    }
 
     let cost = raiseAmount - player.currentBet;
     if(cost >= player.chips) { 
@@ -715,12 +731,14 @@ function findNextTurn(room, activePlayers, isNewStage, roomCode, io) {
 
   if (room.currentTurnId && room.players[room.currentTurnId].isBot) {
     const expectedTurnId = room.currentTurnId;
-    setTimeout(() => {
+    const timerId = setTimeout(() => {
+      room.botTimers = room.botTimers.filter(id => id !== timerId); // 실행 후 배열에서 지움
       if (rooms[roomCode] === room && room.currentTurnId === expectedTurnId) {
         let bot = room.players[room.currentTurnId];
         if (bot && bot.isBot) processBotDecision(room, roomCode, bot, io);
       }
     }, 1500 + Math.random() * 1000);
+    room.botTimers.push(timerId); // 👈 [추가] 생성된 타이머 보관
   } else if (room.currentTurnId) {
     io.to(room.currentTurnId).emit('play_sound', 'my_turn');
     
@@ -801,6 +819,7 @@ io.on('connection', (socket) => {
     const roomCode = String(data.roomCode).substring(0, 20);
     const playerName = String(data.playerName)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;")
       .substring(0, 15);
 
     // 👇 이 3줄을 추가하세요. 방이 30개 이상 만들어지는 것을 막아 무료 서버 다운을 방지합니다.
@@ -815,7 +834,8 @@ io.on('connection', (socket) => {
         status: 'lobby', players: {}, playerOrder: [], deck: [],
         dealerId: null, currentTurnId: null, pot: 0, highestBet: 0,
         lastRaiseAmount: 200, minRaise: 200, stage: 0, communityCards: [],
-        blindLevel: 0, blindEndTime: null, uncontestedWinner: null
+        blindLevel: 0, blindEndTime: null, uncontestedWinner: null,
+        botTimers: [] // 👈 [추가] 봇 타이머들을 추적할 배열
       };
     }
 
@@ -1142,7 +1162,11 @@ io.on('connection', (socket) => {
       io.to(socket.roomCode).emit('play_sound', 'deal');
       
       if (room.currentTurnId && room.players[room.currentTurnId].isBot) {
-        setTimeout(() => { processBotDecision(room, socket.roomCode, room.players[room.currentTurnId], io); }, 1500);
+        const timerId = setTimeout(() => { 
+          room.botTimers = room.botTimers.filter(id => id !== timerId); // 실행 후 배열에서 지움
+          processBotDecision(room, socket.roomCode, room.players[room.currentTurnId], io); 
+        }, 1500);
+        room.botTimers.push(timerId); // 👈 [추가] 생성된 타이머 보관
       } else if (room.currentTurnId) {
         io.to(room.currentTurnId).emit('play_sound', 'my_turn');
         
@@ -1253,9 +1277,12 @@ io.on('connection', (socket) => {
       const onlineHumans = room.playerOrder.filter(id => !room.players[id].isOffline && !room.players[id].isBot);
 
       if (onlineHumans.length === 0) {
-        // 💡 [추가된 코드] 아무도 안 남아서 방을 삭제하기 전에, 작동 중인 타이머가 있다면 확실하게 꺼줍니다!
         if (room.turnTimer) {
           clearTimeout(room.turnTimer);
+        }
+        // 👈 [추가] 봇 타이머가 남아있다면 전부 찾아내서 작동 중지
+        if (room.botTimers && room.botTimers.length > 0) {
+          room.botTimers.forEach(timerId => clearTimeout(timerId));
         }
         delete rooms[roomCode]; 
       } else {
