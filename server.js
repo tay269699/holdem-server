@@ -138,9 +138,27 @@ function distributePots(room) {
       let splitAmount = Math.floor(pot.amount / winners.length);
       let remainder = pot.amount % winners.length; 
       
+      // 👇 [새로 추가된 로직] 공동 승자들을 '딜러의 왼쪽 자리(스몰블라인드)'부터 가까운 순서대로 줄을 세웁니다.
+      let dealerIdx = room.playerOrder.indexOf(room.dealerId);
+      winners.sort((a, b) => {
+        let idxA = room.playerOrder.indexOf(a.pRef.id);
+        let idxB = room.playerOrder.indexOf(b.pRef.id);
+        
+        // 딜러 기준으로 거리를 계산합니다.
+        let distA = (idxA - dealerIdx + room.playerOrder.length) % room.playerOrder.length;
+        let distB = (idxB - dealerIdx + room.playerOrder.length) % room.playerOrder.length;
+        
+        // 딜러 본인이 승자에 포함되어 있다면 최하위(나머지 칩 획득 우선순위 꼴찌)로 둡니다.
+        if (distA === 0) distA = room.playerOrder.length; 
+        if (distB === 0) distB = room.playerOrder.length;
+        
+        return distA - distB; // 거리가 짧은 순(딜러 바로 왼쪽)으로 정렬
+      });
+
+      // 자투리 칩(remainder) 분배
       winners.forEach((w, idx) => { 
         w.pRef.chips += splitAmount; 
-        if (idx === 0) w.pRef.chips += remainder; 
+        if (idx === 0) w.pRef.chips += remainder; // 정렬된 0번째(딜러 왼쪽에 제일 가까운 사람)가 1칩을 챙김!
       });
       
       if (winners.length === 1) {
@@ -194,6 +212,9 @@ function handleAction(room, roomCode, player, data, io) {
   
   // 🌟 [수정 1] 도장을 찍기 전에, 원래 이 사람이 행동을 했었는지 먼저 기억해둡니다!
   const hasAlreadyActed = player.acted;
+  
+  // 👇 여기에 코드를 추가하여 call, fold, raise 등 모든 액션의 중복(따닥)을 즉시 차단합니다.
+  if (hasAlreadyActed) return;
 
   player.acted = true; 
   let actionLog = '';
@@ -214,11 +235,6 @@ function handleAction(room, roomCode, player, data, io) {
     actionLog = `❌ [${player.name}] 님이 폴드했습니다.`;
     io.to(roomCode).emit('play_sound', 'fold');
   } else if (data.action === 'raise') {
-
-    // 🌟 [수정 2] 방금 true로 바뀐 player.acted가 아니라, 아까 기억해둔 hasAlreadyActed를 검사합니다!
-    if (hasAlreadyActed) {
-      return; 
-    }
 
     let raiseAmount = parseInt(data.amount);
     let maxPossibleBet = player.currentBet + player.chips;
@@ -315,6 +331,28 @@ function handleAction(room, roomCode, player, data, io) {
   broadcastGameState(io, roomCode, room);
 }
 
+// =====================================================================
+// 🌟 [최적화 적용] 봇 성격 키워드 배열을 함수 바깥(전역)으로 뺐습니다.
+// =====================================================================
+
+// 🔥 공격형(Aggro) 봇: 블러핑을 자주 하고 레이즈를 세게 때리는 성향
+const aggroKeywords = [
+  '올인하는', '뻥카치는', '대담한', '건방진', '화난', '성급한', '허세부리는', '무서운',
+  '루즈한', '매니악한', '스틸하는', '하이롤러인', '판돈키우는', '역전하는', '대범한', 
+  '당돌한', '거친', '열받은', '신들린', '야비한', '얍삽한', '스냅콜하는', '치사한',
+  '취한', '기분좋은', '장난스러운', '폭소하는', '비웃는', '고집센'
+];
+
+// 🐢 소심형(Tight) 봇: 좋은 패가 뜰 때까지 죽거나, 베팅을 방어적으로 하는 성향
+const tightKeywords = [
+  '소심한', '눈치보는', '쫄보인', '신중한', '계산적인', '수줍은', '예민한', '초조한',
+  '타이트한', '콜만하는', '콜링스테이션인', '체크하는', '포기한', '올인고민하는', 
+  '손떠는', '다리떠는', '기도하는', '땀흘리는', '비관적인', '당황한', '놀란', '흠칫하는',
+  '우아한', '비실대는', '약골인', '얌전한', '아쉬운', '미련남은'
+];
+
+
+// 👇 봇 행동 결정 함수
 function processBotDecision(room, roomCode, bot, io) {
   if (room.currentTurnId !== bot.id || room.status !== 'playing') return;
 
@@ -326,9 +364,9 @@ function processBotDecision(room, roomCode, bot, io) {
   let foldProb = 1.0;  
   let raiseAggressiveness = 0.5; 
 
-  const aggroKeywords = ['올인하는', '뻥카치는', '대담한', '건방진', '화난', '성급한', '허세부리는', '무서운'];
-  const tightKeywords = ['소심한', '눈치보는', '쫄보인', '신중한', '계산적인', '수줍은', '예민한', '초조한'];
+  // 💡 (함수 내부에 있던 배열 선언 코드는 깔끔하게 삭제되었습니다)
 
+  // 바깥에 미리 만들어둔 배열을 참조만 해서 봇의 성격을 재빨리 판단합니다.
   let isAggro = aggroKeywords.some(kw => bot.name.includes(kw));
   let isTight = tightKeywords.some(kw => bot.name.includes(kw));
 
@@ -761,7 +799,9 @@ io.on('connection', (socket) => {
   
   socket.on('join_room', (data) => {
     const roomCode = String(data.roomCode).substring(0, 20);
-    const playerName = String(data.playerName).substring(0, 15);
+    const playerName = String(data.playerName)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .substring(0, 15);
 
     // 👇 이 3줄을 추가하세요. 방이 30개 이상 만들어지는 것을 막아 무료 서버 다운을 방지합니다.
     if (Object.keys(rooms).length >= 30 && !rooms[roomCode]) {
@@ -830,40 +870,60 @@ io.on('connection', (socket) => {
       
       let botId = 'bot_' + Math.random().toString(36).substr(2, 9);
       
-      // 형용사 50개 (홀덤 상황 + 성격 조합)
+      // 형용사 200개 (홀덤 상황 + 성격/감정/상태 조합)
       const adjectives = [
-        '올인하는', '뻥카치는', '눈치보는', '대담한', '소심한', 
-        '운좋은', '돈많은', '파산한', '깐깐한', '졸린', 
-        '배고픈', '쫄보인', '블러핑하는', '레이즈하는', '폴드하는', 
-        '고민하는', '계산적인', '배짱좋은', '본전찾는', '잃을것없는', 
-        '건방진', '친절한', '화난', '멍청한', '똑똑한', 
-        '수상한', '억울한', '행복한', '슬픈', '바쁜', 
-        '심심한', '귀여운', '무서운', '수줍은', '뻔뻔한', 
-        '게으른', '성급한', '느긋한', '예민한', '둔감한', 
-        '변덕스러운', '음흉한', '시크한', '엉뚱한', '침착한', 
-        '허세부리는', '기대하는', '절망한', '신난', '초조한'
+        '올인하는', '뻥카치는', '눈치보는', '대담한', '소심한', '운좋은', '돈많은', '파산한', '깐깐한', '졸린', 
+        '배고픈', '쫄보인', '블러핑하는', '레이즈하는', '폴드하는', '고민하는', '계산적인', '배짱좋은', '본전찾는', '잃을것없는', 
+        '건방진', '친절한', '화난', '멍청한', '똑똑한', '수상한', '억울한', '행복한', '슬픈', '바쁜', 
+        '심심한', '귀여운', '무서운', '수줍은', '뻔뻔한', '게으른', '성급한', '느긋한', '예민한', '둔감한', 
+        '변덕스러운', '음흉한', '시크한', '엉뚱한', '침착한', '허세부리는', '기대하는', '절망한', '신난', '초조한',
+        '칩많은', '콜만하는', '숏스택인', '딥스택인', '포커페이스인', '승률높은', '운없는', '타이트한', '루즈한', '매니악한',
+        '리바이하는', '멘붕온', '배드비트맞은', '스틸하는', '넛들고있는', '드로우하는', '콜링스테이션인', '하이롤러인', '체크하는', '카드보는',
+        '판돈키우는', '스냅콜하는', '풀하우스뜬', '플러시맞은', '뽀쁠인', '양차인', '뒷발차는', '뽀록터진', '포기한', '역전하는',
+        '올인고민하는', '칩정리하는', '딜러째려보는', '기도하는', '손떠는', '다리떠는', '땀흘리는', '침흘리는', '눈웃음치는', '윙크하는',
+        '하품하는', '한숨쉬는', '멍때리는', '박수치는', '소리치는', '배부른', '취한', '맨정신의', '화장실급한', '외로운',
+        '사랑스러운', '듬직한', '얄미운', '잔머리굴리는', '순진한', '엉큼한', '발랄한', '우아한', '거친', '부드러운',
+        '까칠한', '털털한', '소탈한', '고집센', '유연한', '진지한', '장난스러운', '기분좋은', '짜증난', '억척스러운',
+        '쿨한', '핫한', '힙한', '촌스러운', '세련된', '낭만적인', '현실적인', '감성적인', '이성적인', '낙천적인',
+        '비관적인', '긍정적인', '부정적인', '열받은', '신들린', '재수없는', '기가막힌', '어이없는', '황당한', '뿌듯한',
+        '흐뭇한', '만족한', '아쉬운', '미련남은', '미소짓는', '폭소하는', '낄낄대는', '비웃는', '칭찬하는', '위로하는',
+        '놀란', '경악한', '흠칫하는', '당황한', '뻘쭘한', '머쓱한', '당돌한', '대범한', '치사한', '얍삽한',
+        '정정당당한', '야비한', '착한', '나쁜', '이상한', '평범한', '특별한', '흔한', '독특한', '기발한',
+        '창의적인', '고전적인', '트렌디한', '고독한', '화려한', '수수한', '낡은', '새로운', '빛나는', '어두운',
+        '칙칙한', '맑은', '흐린', '차분한', '요란한', '시끄러운', '고요한', '적막한', '웅장한', '초라한',
+        '거대한', '아담한', '뚱뚱한', '홀쭉한', '날씬한', '통통한', '근육질의', '약골인', '튼튼한', '비실대는'
       ];
 
-      // 명사 50개 (친근하고 귀여운 동물들)
+      // 명사 200개 (친근하고 귀여운 동물 + 다양한 반려/야생 동물들)
       const nouns = [
-        '알파카', '너구리', '고양이', '강아지', '거북이', 
-        '펭귄', '호랑이', '병아리', '다람쥐', '토끼', 
-        '원숭이', '사자', '곰', '여우', '늑대', 
-        '돼지', '흑염소', '망아지', '양', '수탉', 
-        '오리', '비둘기', '참새', '까마귀', '부엉이', 
-        '개구리', '악어', '상어', '고래', '돌고래', 
-        '문어', '오징어', '꽃게', '랍스터', '달팽이', 
-        '햄스터', '고슴도치', '코끼리', '기린', '하마', 
-        '코뿔소', '침팬지', '고릴라', '미어캣', '캥거루', 
-        '코알라', '독수리', '펠리컨', '두꺼비', '카멜레온'
+        '알파카', '너구리', '고양이', '강아지', '거북이', '펭귄', '호랑이', '병아리', '다람쥐', '토끼', 
+        '원숭이', '사자', '곰', '여우', '늑대', '돼지', '흑염소', '망아지', '양', '수탉', 
+        '오리', '비둘기', '참새', '까마귀', '부엉이', '개구리', '악어', '상어', '고래', '돌고래', 
+        '문어', '오징어', '꽃게', '랍스터', '달팽이', '햄스터', '고슴도치', '코끼리', '기린', '하마', 
+        '코뿔소', '침팬지', '고릴라', '미어캣', '캥거루', '코알라', '독수리', '펠리컨', '두꺼비', '카멜레온',
+        '기니피그', '친칠라', '페럿', '앵무새', '금붕어', '거위', '해파리', '불가사리', '해마', '물개',
+        '바다표범', '수달', '해달', '랫서팬더', '판다', '북극곰', '반달곰', '불독', '푸들', '치와와',
+        '리트리버', '웰시코기', '허스키', '말라뮤트', '시바견', '비글', '닥스훈트', '포메라니안', '페르시안', '샴고양이',
+        '먼치킨', '스핑크스', '뱅갈고양이', '나무늘보', '카피바라', '웜뱃', '쿼카', '스컹크', '아르마딜로', '두더지',
+        '박쥐', '올빼미', '타조', '기러기', '백조', '홍학', '공작새', '꿩', '메추라기', '칠면조',
+        '암탉', '송아지', '황소', '젖소', '조랑말', '당나귀', '낙타', '사슴', '고라니', '노루',
+        '순록', '영양', '얼룩말', '멧돼지', '표범', '치타', '재규어', '퓨마', '스라소니', '하이에나',
+        '바분', '오랑우탄', '개미핥기', '쥐', '생쥐', '청설모', '하늘다람쥐', '슈가글라이더', '족제비', '담비',
+        '오소리', '몽구스', '미꾸라지', '잉어', '붕어', '연어', '참치', '고등어', '갈치', '복어',
+        '가오리', '새우', '소라', '조개', '굴', '전복', '거미', '나비', '벌', '개미',
+        '무당벌레', '장수풍뎅이', '사슴벌레', '매미', '잠자리', '메뚜기', '사마귀', '반딧불이', '달마시안', '셰퍼드',
+        '퍼그', '시츄', '말티즈', '요크셔테리어', '코카스파니엘', '슈나우저', '비숑', '사모예드', '보더콜리', '진돗개',
+        '풍산개', '삽살개', '스피츠', '파피용', '맹꽁이', '도롱뇽', '이구아나', '코브라', '방울뱀', '아나콘다',
+        '가시두더지', '오리너구리', '바다거북', '물소', '바다코끼리', '일각고래', '범고래', '향유고래', '듀공', '매너티'
       ];
 
       // 리스트에서 각각 하나씩 랜덤으로 뽑아서 이름 조합 (형용사, 명사 개별 중복 방지 로직)
       let botName = '';
       let isDuplicate = true;
+      let attempts = 0; // 👈 1. 무한 루프 방지용 시도 횟수 변수 추가
       
-      // 뽑은 형용사나 명사가 이미 존재하는지 확인하고, 겹치면 다시 뽑습니다!
-      while (isDuplicate) {
+      // 뽑은 형용사나 명사가 이미 존재하는지 확인하고, 겹치면 다시 뽑습니다! (최대 10번까지만)
+      while (isDuplicate && attempts < 10) { // 👈 2. 10번 제한 추가
         const randomAdj = adjectives[Math.floor(Math.random() * adjectives.length)];
         const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
         botName = `🤖 ${randomAdj} ${randomNoun}`;
@@ -872,6 +932,13 @@ io.on('connection', (socket) => {
         isDuplicate = Object.values(room.players).some(p => {
           return p.name.includes(randomAdj) || p.name.includes(randomNoun);
         });
+        
+        attempts++; // 👈 3. 한 번 돌 때마다 횟수 증가
+      }
+
+      // 👈 4. 만약 악성 유저 때문에 10번 다 겹쳤다면, 그냥 안전하게 랜덤 숫자를 붙여버림
+      if (isDuplicate) {
+        botName = `🤖 봇_${Math.floor(Math.random() * 1000)}`;
       }
       
       room.players[botId] = {
@@ -940,23 +1007,27 @@ io.on('connection', (socket) => {
       // [오류 수정] 결과창(stage 5)에서는 이미 남에게 넘어간 돈이므로 베팅 금액(invested)을 재산에서 뺍니다.
       const currentInvested = (room.status === 'playing' && room.stage < 5) ? p.invested : 0;
       
-      // 진짜 남은 칩 + 아직 승부가 안 난 베팅 칩 + 예약 칩 합산
-      const totalWealth = p.chips + currentInvested + (p.pendingRebuy ? 10000 : 0);
+      // 💡 예약 칩 합산 로직 변경: pendingRebuy 자체가 부족한 칩의 액수이므로 그대로 더합니다.
+      const totalWealth = p.chips + currentInvested + p.pendingRebuy;
       
-      if (totalWealth < 10000) {
+      // 👇 완전히 파산(0칩)했을 때만 리바이를 허용하도록 변경합니다.
+      if (totalWealth === 0) {
+        // 파산 상태이므로 무조건 10,000칩을 충전해 줍니다.
+        const refillAmount = 10000;
+
         if (room.status === 'playing' && room.stage < 5) {
-          p.pendingRebuy = 1;
-          socket.emit('system_message', "💸 리바이 예약 완료!\n이번 판이 끝나고 다음 판이 시작될 때 충전됩니다.");
+          p.pendingRebuy += refillAmount; 
+          socket.emit('system_message', `💸 리바이 예약 완료!\n이번 판이 끝나면 ${refillAmount.toLocaleString()}칩이 충전됩니다.`);
         } else {
-          p.chips += 10000;
+          p.chips += refillAmount; 
           p.rebuyCount += 1;
-          socket.emit('system_message', "💸 리바이 완료!\n10,000 칩이 즉시 충전되었습니다.");
+          socket.emit('system_message', `💸 리바이 완료!\n${refillAmount.toLocaleString()}칩이 즉시 충전되었습니다.`);
         }
         broadcastGameState(io, socket.roomCode, room);
-        io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `💸 ${p.name} 님이 리바이를 요청했습니다.` });
+        io.to(socket.roomCode).emit('chat_message', { type: 'sys', msg: `💸 ${p.name} 님이 파산 후 리바이를 요청했습니다.` });
       } else {
-        // 전재산이 10,000 이상이면 단호하게 거절 메시지를 보냅니다.
-        socket.emit('system_message', "⚠️ 충전 불가\n현재 보유 칩(베팅 중인 칩 포함)이 10,000 이상이므로 충전할 수 없습니다.");
+        // 전재산이 1 이상 남아있으면 거절 메시지를 보냅니다.
+        socket.emit('system_message', "⚠️ 충전 불가\n칩을 모두 잃은 파산(0칩) 상태에서만 리바이할 수 있습니다.");
       }
     }
   });
@@ -982,9 +1053,9 @@ io.on('connection', (socket) => {
         }
 
         // 💸 2. 멘탈 판독이 끝났으니, 안심하고 칩을 충전해 줍니다.
-        if (p.pendingRebuy) {
-          p.chips += (10000 * p.pendingRebuy);
-          p.rebuyCount += p.pendingRebuy;
+        if (p.pendingRebuy > 0) {
+          p.chips += p.pendingRebuy; // 💡 10000을 곱하지 않고 예약된 금액 자체를 더함
+          p.rebuyCount += 1;         // 💡 리바이 횟수는 1회 증가로 고정
           p.pendingRebuy = 0;
         }
         if (p.isBot && p.chips < 200) { p.chips += 10000; p.rebuyCount++; }
@@ -1007,8 +1078,11 @@ io.on('connection', (socket) => {
 
       let dIdx = 0;
       if (!isNextHand) {
-        // [자리 배치 버그 수정] 첫 게임 시작 시 방의 전체 좌석표를 완전히 랜덤하게 섞고 고정합니다.
-        room.playerOrder.sort(() => Math.random() - 0.5);
+        // [자리 배치 버그 수정] 첫 게임 시작 시 방의 전체 좌석표를 완벽하게 랜덤으로 섞고 고정합니다.
+        for (let i = room.playerOrder.length - 1; i > 0; i--) {
+          let j = Math.floor(Math.random() * (i + 1));
+          [room.playerOrder[i], room.playerOrder[j]] = [room.playerOrder[j], room.playerOrder[i]];
+        }
         
         // 섞인 진짜 좌석표를 기준으로 참가자 명단을 다시 뽑습니다.
         activeIds.length = 0;
@@ -1179,6 +1253,10 @@ io.on('connection', (socket) => {
       const onlineHumans = room.playerOrder.filter(id => !room.players[id].isOffline && !room.players[id].isBot);
 
       if (onlineHumans.length === 0) {
+        // 💡 [추가된 코드] 아무도 안 남아서 방을 삭제하기 전에, 작동 중인 타이머가 있다면 확실하게 꺼줍니다!
+        if (room.turnTimer) {
+          clearTimeout(room.turnTimer);
+        }
         delete rooms[roomCode]; 
       } else {
         if (wasHost) { player.isHost = false; room.players[onlineHumans[0]].isHost = true; }
@@ -1206,7 +1284,11 @@ io.on('connection', (socket) => {
             }
           }
         } else {
-          if (room.status === 'lobby') io.to(roomCode).emit('update_lobby', Object.values(room.players));
+          if (room.status === 'lobby') {
+            delete room.players[socket.id];
+            room.playerOrder = room.playerOrder.filter(id => id !== socket.id);
+            io.to(roomCode).emit('update_lobby', Object.values(room.players));
+          }
           // 보안 패치 유지
           else broadcastGameState(io, roomCode, room);
         }
